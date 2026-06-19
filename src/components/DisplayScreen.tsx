@@ -2,7 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { StageView } from "@/components/StageView";
-import { STORAGE_KEY, createEmptySession } from "@/lib/classpilot";
+import {
+  LEGACY_STORAGE_KEY,
+  STORAGE_KEY,
+  createEmptySession,
+  normalizeSession,
+} from "@/lib/classpilot";
 import type { ClassSession } from "@/types/classpilot";
 
 export function DisplayScreen() {
@@ -12,14 +17,16 @@ export function DisplayScreen() {
 
   useEffect(() => {
     function loadSession() {
-      const stored = window.localStorage.getItem(STORAGE_KEY);
+      const stored =
+        window.localStorage.getItem(STORAGE_KEY) ??
+        window.localStorage.getItem(LEGACY_STORAGE_KEY);
 
       if (!stored) {
         return;
       }
 
       try {
-        setSession(JSON.parse(stored) as ClassSession);
+        setSession(normalizeSession(JSON.parse(stored)));
       } catch {
         window.localStorage.removeItem(STORAGE_KEY);
       }

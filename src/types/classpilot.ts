@@ -1,6 +1,12 @@
 export type Student = {
   id: string;
   name: string;
+  position: StudentPosition;
+};
+
+export type StudentPosition = {
+  x: number;
+  y: number;
 };
 
 export type Topic = {
@@ -13,6 +19,7 @@ export type Team = {
   name: string;
   students: Student[];
   topic?: Topic;
+  score: number;
 };
 
 export type PollStatus = "draft" | "active" | "closed";
@@ -36,6 +43,41 @@ export type TimerState = {
   running: boolean;
 };
 
+export type AppStep = "start" | "class-name" | "students" | "main";
+
+export type MainSection = "home" | "actions" | "teams";
+
+export type ActionId =
+  | "team-maker"
+  | "topic-assignment"
+  | "timer"
+  | "random-student"
+  | "presentation-order"
+  | "poll"
+  | "score"
+  | "mini-game"
+  | "reward"
+  | "finale";
+
+export type PresentationMode = "team" | "student";
+
+export type PollTarget = "team" | "student";
+
+export type ScoreEvent = {
+  id: string;
+  teamId: string;
+  teamName: string;
+  points: number;
+  reason: string;
+  createdAt: number;
+};
+
+export type FinaleState = {
+  finished: boolean;
+  winnerTeamId?: string;
+  finishedAt?: number;
+};
+
 export type StageMode =
   | "dashboard"
   | "teams"
@@ -46,14 +88,23 @@ export type StageMode =
   | "random";
 
 export type ClassSession = {
+  className: string;
+  appStep: AppStep;
+  mainSection: MainSection;
   students: Student[];
   teams: Team[];
   topics: Topic[];
   presentationOrder: Team[];
+  studentPresentationOrder: Student[];
+  presentationMode: PresentationMode;
   polls: Poll[];
   activePollId?: string;
+  pollTarget: PollTarget;
   timer: TimerState;
   stageMode: StageMode;
   selectedStudent?: Student;
+  reward: string;
+  scoreEvents: ScoreEvent[];
+  finale: FinaleState;
   updatedAt: number;
 };

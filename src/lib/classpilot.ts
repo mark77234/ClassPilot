@@ -1,15 +1,26 @@
 import type {
+  ActionId,
   ClassSession,
+  MainSection,
   Poll,
   PollOption,
+  ScoreEvent,
   StageMode,
   Student,
+  StudentPosition,
   Team,
   TimerState,
   Topic,
 } from "@/types/classpilot";
 
 type RandomSource = () => number;
+
+export type ActionDefinition = {
+  id: ActionId;
+  title: string;
+  shortTitle: string;
+  detail: string;
+};
 
 const TEAM_NAMES = [
   "로켓팀",
@@ -22,9 +33,73 @@ const TEAM_NAMES = [
   "해치팀",
 ];
 
-export const STORAGE_KEY = "classpilot.session.v1";
+export const STORAGE_KEY = "classpilot.session.v2";
+export const LEGACY_STORAGE_KEY = "classpilot.session.v1";
 
 export const DEFAULT_TIMER_SECONDS = 15 * 60;
+
+export const ACTION_DEFINITIONS: ActionDefinition[] = [
+  {
+    id: "team-maker",
+    title: "팀 만들기",
+    shortTitle: "팀",
+    detail: "학생들을 팀으로 나눕니다.",
+  },
+  {
+    id: "topic-assignment",
+    title: "주제 배정",
+    shortTitle: "주제",
+    detail: "팀별 주제를 직접 배치합니다.",
+  },
+  {
+    id: "timer",
+    title: "수업 타이머",
+    shortTitle: "타이머",
+    detail: "활동 시간을 크게 표시합니다.",
+  },
+  {
+    id: "random-student",
+    title: "랜덤 학생 뽑기",
+    shortTitle: "뽑기",
+    detail: "오늘의 주인공을 뽑습니다.",
+  },
+  {
+    id: "presentation-order",
+    title: "발표 순서",
+    shortTitle: "발표",
+    detail: "팀 또는 개인 발표 순서를 만듭니다.",
+  },
+  {
+    id: "poll",
+    title: "투표",
+    shortTitle: "투표",
+    detail: "팀 또는 개인 투표를 진행합니다.",
+  },
+  {
+    id: "score",
+    title: "점수 추가",
+    shortTitle: "점수",
+    detail: "팀 점수와 이유를 기록합니다.",
+  },
+  {
+    id: "mini-game",
+    title: "점수 룰렛",
+    shortTitle: "룰렛",
+    detail: "팀 보너스 점수를 뽑습니다.",
+  },
+  {
+    id: "reward",
+    title: "우승 상품 정하기",
+    shortTitle: "상품",
+    detail: "우승팀에게 줄 상품을 정합니다.",
+  },
+  {
+    id: "finale",
+    title: "점수 산정하기",
+    shortTitle: "마무리",
+    detail: "최종 우승팀을 발표합니다.",
+  },
+];
 
 export function createId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -34,18 +109,84 @@ export function createId(prefix: string): string {
 
 export function createEmptySession(): ClassSession {
   return {
+    className: "",
+    appStep: "start",
+    mainSection: "home",
     students: [],
     teams: [],
     topics: [],
     presentationOrder: [],
+    studentPresentationOrder: [],
+    presentationMode: "team",
     polls: [],
+    pollTarget: "team",
     timer: {
       duration: DEFAULT_TIMER_SECONDS,
       remaining: DEFAULT_TIMER_SECONDS,
       running: false,
     },
     stageMode: "dashboard",
+    reward: "",
+    scoreEvents: [],
+    finale: {
+      finished: false,
+    },
     updatedAt: Date.now(),
+  };
+}
+
+export function normalizeSession(value: unknown): ClassSession {
+  const base = createEmptySession();
+
+  if (!value || typeof value !== "object") {
+    return base;
+  }
+
+  const raw = value as Partial<ClassSession> & Record<string, unknown>;
+  const students = normalizeStudents(raw.students);
+  const teams = normalizeTeams(raw.teams, students);
+  const scoreEvents = normalizeScoreEvents(raw.scoreEvents);
+
+  return {
+    ...base,
+    className: typeof raw.className === "string" ? raw.className : "",
+    appStep: isAppStep(raw.appStep) ? raw.appStep : inferAppStep(raw, students),
+    mainSection: isMainSection(raw.mainSection) ? raw.mainSection : "home",
+    students,
+    teams,
+    topics: normalizeTopics(raw.topics),
+    presentationOrder: normalizeTeams(raw.presentationOrder, students),
+    studentPresentationOrder: normalizeStudents(raw.studentPresentationOrder),
+    presentationMode:
+      raw.presentationMode === "student" || raw.presentationMode === "team"
+        ? raw.presentationMode
+        : "team",
+    polls: normalizePolls(raw.polls),
+    activePollId:
+      typeof raw.activePollId === "string" ? raw.activePollId : undefined,
+    pollTarget: raw.pollTarget === "student" ? "student" : "team",
+    timer: normalizeTimer(raw.timer),
+    stageMode: isStageMode(raw.stageMode) ? raw.stageMode : "dashboard",
+    selectedStudent: normalizeSelectedStudent(raw.selectedStudent, students),
+    reward: typeof raw.reward === "string" ? raw.reward : "",
+    scoreEvents,
+    finale:
+      raw.finale && typeof raw.finale === "object"
+        ? {
+            finished: Boolean((raw.finale as { finished?: unknown }).finished),
+            winnerTeamId:
+              typeof (raw.finale as { winnerTeamId?: unknown }).winnerTeamId ===
+              "string"
+                ? (raw.finale as { winnerTeamId: string }).winnerTeamId
+                : undefined,
+            finishedAt:
+              typeof (raw.finale as { finishedAt?: unknown }).finishedAt ===
+              "number"
+                ? (raw.finale as { finishedAt: number }).finishedAt
+                : undefined,
+          }
+        : base.finale,
+    updatedAt: typeof raw.updatedAt === "number" ? raw.updatedAt : Date.now(),
   };
 }
 
@@ -67,34 +208,103 @@ export function parseLines(input: string): string[] {
     .filter(Boolean);
 }
 
+export function createStudent(name: string, index: number, total = 24): Student {
+  return {
+    id: `student-${index + 1}-${slugify(name) || createId("name")}`,
+    name,
+    position: getDefaultStudentPosition(index, total),
+  };
+}
+
 export function createStudents(names: string[]): Student[] {
   const seen = new Set<string>();
+  const uniqueNames = names.filter((name) => {
+    const key = name.toLowerCase();
+    if (seen.has(key)) {
+      return false;
+    }
+    seen.add(key);
+    return true;
+  });
 
-  return names
-    .filter((name) => {
-      const key = name.toLowerCase();
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    })
-    .map((name, index) => ({
-      id: `student-${index + 1}-${slugify(name)}`,
-      name,
-    }));
+  return uniqueNames.map((name, index) =>
+    createStudent(name, index, Math.max(uniqueNames.length, 1)),
+  );
+}
+
+export function addStudentToSession(
+  session: ClassSession,
+  name: string,
+): ClassSession {
+  const trimmedName = name.trim();
+  const exists = session.students.some(
+    (student) => student.name.toLowerCase() === trimmedName.toLowerCase(),
+  );
+
+  if (!trimmedName || exists) {
+    return session;
+  }
+
+  const students = [
+    ...session.students,
+    createStudent(trimmedName, session.students.length, session.students.length + 1),
+  ];
+
+  return withSessionUpdate(session, {
+    students,
+    teams: removeMissingStudentsFromTeams(session.teams, students),
+  });
+}
+
+export function removeStudentFromSession(
+  session: ClassSession,
+  studentId: string,
+): ClassSession {
+  const students = session.students.filter((student) => student.id !== studentId);
+
+  return withSessionUpdate(session, {
+    students,
+    teams: removeMissingStudentsFromTeams(session.teams, students),
+    presentationOrder: removeMissingStudentsFromTeams(
+      session.presentationOrder,
+      students,
+    ),
+    studentPresentationOrder: session.studentPresentationOrder.filter(
+      (student) => student.id !== studentId,
+    ),
+    selectedStudent:
+      session.selectedStudent?.id === studentId ? undefined : session.selectedStudent,
+  });
+}
+
+export function updateStudentPosition(
+  students: Student[],
+  studentId: string,
+  position: StudentPosition,
+): Student[] {
+  return students.map((student) =>
+    student.id === studentId
+      ? {
+          ...student,
+          position: {
+            x: clamp(position.x, 4, 96),
+            y: clamp(position.y, 8, 92),
+          },
+        }
+      : student,
+  );
 }
 
 export function createTopics(titles: string[]): Topic[] {
   return titles.map((title, index) => ({
-    id: `topic-${index + 1}-${slugify(title)}`,
+    id: `topic-${index + 1}-${slugify(title) || createId("topic")}`,
     title,
   }));
 }
 
 export function createPoll(question: string, labels: string[]): Poll {
   const options = labels.map<PollOption>((label, index) => ({
-    id: `option-${index + 1}-${slugify(label)}`,
+    id: `option-${index + 1}-${slugify(label) || createId("option")}`,
     label,
   }));
 
@@ -122,6 +332,7 @@ export function createTeams(
     id: `team-${index + 1}`,
     name: TEAM_NAMES[index] ?? `${index + 1}팀`,
     students: [] as Student[],
+    score: 0,
   }));
 
   shuffled.forEach((student, index) => {
@@ -129,6 +340,32 @@ export function createTeams(
   });
 
   return teams;
+}
+
+export function renameTeam(teams: Team[], teamId: string, name: string): Team[] {
+  return teams.map((team) =>
+    team.id === teamId ? { ...team, name: name.trim() || team.name } : team,
+  );
+}
+
+export function assignTopicToTeam(
+  teams: Team[],
+  teamId: string,
+  topicTitle: string,
+): Team[] {
+  return teams.map((team) =>
+    team.id === teamId
+      ? {
+          ...team,
+          topic: topicTitle.trim()
+            ? {
+                id: `topic-${team.id}-${slugify(topicTitle) || createId("topic")}`,
+                title: topicTitle.trim(),
+              }
+            : undefined,
+        }
+      : team,
+  );
 }
 
 export function assignTopicsToTeams(
@@ -162,6 +399,13 @@ export function createPresentationOrder(
   return shuffle(teams, random);
 }
 
+export function createStudentPresentationOrder(
+  students: Student[],
+  random: RandomSource = Math.random,
+): Student[] {
+  return shuffle(students, random);
+}
+
 export function pickRandomStudent(
   students: Student[],
   random: RandomSource = Math.random,
@@ -193,10 +437,87 @@ export function getPollTotalVotes(poll: Poll): number {
   return Object.values(poll.votes).reduce((total, count) => total + count, 0);
 }
 
+export function addScoreEvent(
+  session: ClassSession,
+  teamId: string,
+  points: number,
+  reason: string,
+): ClassSession {
+  const team = session.teams.find((item) => item.id === teamId);
+
+  if (!team || !Number.isFinite(points)) {
+    return session;
+  }
+
+  const roundedPoints = Math.round(points);
+  const event: ScoreEvent = {
+    id: createId("score"),
+    teamId,
+    teamName: team.name,
+    points: roundedPoints,
+    reason: reason.trim() || "수업 점수",
+    createdAt: Date.now(),
+  };
+
+  return withSessionUpdate(session, {
+    teams: session.teams.map((item) =>
+      item.id === teamId
+        ? {
+            ...item,
+            score: item.score + roundedPoints,
+          }
+        : item,
+    ),
+    scoreEvents: [...session.scoreEvents, event],
+    finale: {
+      finished: false,
+    },
+  });
+}
+
+export function spinScoreRoulette(random: RandomSource = Math.random): number {
+  const points = [5, 10, 15, 20, 25, 30];
+  return points[Math.floor(random() * points.length)];
+}
+
+export function getWinnerTeam(teams: Team[]): Team | undefined {
+  return [...teams].sort((left, right) => right.score - left.score)[0];
+}
+
+export function getRankedTeams(teams: Team[]): Team[] {
+  return [...teams].sort((left, right) => {
+    if (right.score !== left.score) {
+      return right.score - left.score;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
+export function finishSession(session: ClassSession): ClassSession {
+  const winner = getWinnerTeam(session.teams);
+
+  return withSessionUpdate(session, {
+    finale: {
+      finished: true,
+      winnerTeamId: winner?.id,
+      finishedAt: Date.now(),
+    },
+  });
+}
+
+export function getActionDefinition(actionId: string): ActionDefinition | undefined {
+  return ACTION_DEFINITIONS.find((action) => action.id === actionId);
+}
+
+export function isActionId(actionId: string): actionId is ActionId {
+  return ACTION_DEFINITIONS.some((action) => action.id === actionId);
+}
+
 export function getStageLabel(stageMode: StageMode): string {
   const labels: Record<StageMode, string> = {
-    dashboard: "대시보드",
-    teams: "팀 공개",
+    dashboard: "홈",
+    teams: "팀 현황",
     topics: "주제 배정",
     timer: "타이머",
     presentation: "발표 순서",
@@ -207,6 +528,16 @@ export function getStageLabel(stageMode: StageMode): string {
   return labels[stageMode];
 }
 
+export function getMainSectionLabel(section: MainSection): string {
+  const labels: Record<MainSection, string> = {
+    home: "홈",
+    actions: "액션",
+    teams: "팀",
+  };
+
+  return labels[section];
+}
+
 export function formatTime(totalSeconds: number): string {
   const minutes = Math.floor(Math.max(0, totalSeconds) / 60);
   const seconds = Math.max(0, totalSeconds) % 60;
@@ -214,6 +545,13 @@ export function formatTime(totalSeconds: number): string {
   return `${minutes.toString().padStart(2, "0")}:${seconds
     .toString()
     .padStart(2, "0")}`;
+}
+
+export function formatEventTime(timestamp: number): string {
+  return new Intl.DateTimeFormat("ko-KR", {
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(timestamp);
 }
 
 export function createTimer(minutes: number): TimerState {
@@ -262,6 +600,289 @@ export function getSampleTopicText(): string {
 
 export function getSamplePollOptions(): string {
   return ["로켓팀", "스파크팀", "웨이브팀", "픽셀팀"].join("\n");
+}
+
+function normalizeStudents(value: unknown): Student[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item, index): Student | undefined => {
+      if (!item || typeof item !== "object") {
+        return undefined;
+      }
+
+      const raw = item as Partial<Student> & Record<string, unknown>;
+      const name = typeof raw.name === "string" ? raw.name.trim() : "";
+
+      if (!name) {
+        return undefined;
+      }
+
+      return {
+        id: typeof raw.id === "string" ? raw.id : `student-${index + 1}`,
+        name,
+        position: normalizePosition(raw.position, index, value.length),
+      };
+    })
+    .filter((student): student is Student => Boolean(student));
+}
+
+function normalizeTeams(value: unknown, students: Student[]): Team[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const studentMap = new Map(students.map((student) => [student.id, student]));
+
+  return value
+    .map((item, index): Team | undefined => {
+      if (!item || typeof item !== "object") {
+        return undefined;
+      }
+
+      const raw = item as Partial<Team> & Record<string, unknown>;
+      const teamStudents = Array.isArray(raw.students)
+        ? raw.students
+            .map((student) => {
+              if (!student || typeof student !== "object") {
+                return undefined;
+              }
+
+              const id = (student as Partial<Student>).id;
+              return typeof id === "string" ? studentMap.get(id) : undefined;
+            })
+            .filter((student): student is Student => Boolean(student))
+        : [];
+
+      const team: Team = {
+        id: typeof raw.id === "string" ? raw.id : `team-${index + 1}`,
+        name:
+          typeof raw.name === "string" && raw.name.trim()
+            ? raw.name
+            : TEAM_NAMES[index] ?? `${index + 1}팀`,
+        students: teamStudents,
+        topic:
+          raw.topic && typeof raw.topic === "object"
+            ? normalizeTopic(raw.topic)
+            : undefined,
+        score: typeof raw.score === "number" ? raw.score : 0,
+      };
+
+      return team;
+    })
+    .filter((team): team is Team => Boolean(team));
+}
+
+function normalizeTopics(value: unknown): Topic[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item, index) => {
+      if (!item || typeof item !== "object") {
+        return undefined;
+      }
+
+      return normalizeTopic(item, index);
+    })
+    .filter((topic): topic is Topic => Boolean(topic));
+}
+
+function normalizeTopic(value: unknown, index = 0): Topic | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const raw = value as Partial<Topic>;
+  const title = typeof raw.title === "string" ? raw.title.trim() : "";
+
+  if (!title) {
+    return undefined;
+  }
+
+  return {
+    id: typeof raw.id === "string" ? raw.id : `topic-${index + 1}`,
+    title,
+  };
+}
+
+function normalizePolls(value: unknown): Poll[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value
+    .map((item) => {
+      if (!item || typeof item !== "object") {
+        return undefined;
+      }
+
+      const raw = item as Partial<Poll>;
+      const options = Array.isArray(raw.options)
+        ? raw.options.filter(
+            (option): option is PollOption =>
+              Boolean(
+                option &&
+                  typeof option.id === "string" &&
+                  typeof option.label === "string",
+              ),
+          )
+        : [];
+
+      if (!raw.question || options.length === 0) {
+        return undefined;
+      }
+
+      return {
+        id: typeof raw.id === "string" ? raw.id : createId("poll"),
+        question: raw.question,
+        options,
+        votes:
+          raw.votes && typeof raw.votes === "object"
+            ? (raw.votes as Record<string, number>)
+            : Object.fromEntries(options.map((option) => [option.id, 0])),
+        status:
+          raw.status === "draft" || raw.status === "closed"
+            ? raw.status
+            : "active",
+      };
+    })
+    .filter((poll): poll is Poll => Boolean(poll));
+}
+
+function normalizeTimer(value: unknown): TimerState {
+  if (!value || typeof value !== "object") {
+    return createEmptySession().timer;
+  }
+
+  const raw = value as Partial<TimerState>;
+  const duration =
+    typeof raw.duration === "number" ? raw.duration : DEFAULT_TIMER_SECONDS;
+  const remaining =
+    typeof raw.remaining === "number" ? raw.remaining : DEFAULT_TIMER_SECONDS;
+
+  return {
+    duration,
+    remaining,
+    running: Boolean(raw.running) && remaining > 0,
+  };
+}
+
+function normalizeScoreEvents(value: unknown): ScoreEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.filter(
+    (item): item is ScoreEvent =>
+      Boolean(
+        item &&
+          typeof item === "object" &&
+          typeof (item as ScoreEvent).id === "string" &&
+          typeof (item as ScoreEvent).teamId === "string" &&
+          typeof (item as ScoreEvent).teamName === "string" &&
+          typeof (item as ScoreEvent).points === "number" &&
+          typeof (item as ScoreEvent).reason === "string" &&
+          typeof (item as ScoreEvent).createdAt === "number",
+      ),
+  );
+}
+
+function normalizeSelectedStudent(
+  value: unknown,
+  students: Student[],
+): Student | undefined {
+  if (!value || typeof value !== "object") {
+    return undefined;
+  }
+
+  const id = (value as Partial<Student>).id;
+
+  return typeof id === "string"
+    ? students.find((student) => student.id === id)
+    : undefined;
+}
+
+function normalizePosition(
+  value: unknown,
+  index: number,
+  total: number,
+): StudentPosition {
+  if (value && typeof value === "object") {
+    const raw = value as Partial<StudentPosition>;
+    if (typeof raw.x === "number" && typeof raw.y === "number") {
+      return {
+        x: clamp(raw.x, 4, 96),
+        y: clamp(raw.y, 8, 92),
+      };
+    }
+  }
+
+  return getDefaultStudentPosition(index, total);
+}
+
+function getDefaultStudentPosition(index: number, total: number): StudentPosition {
+  const columns = Math.ceil(Math.sqrt(Math.max(total, 1)));
+  const rows = Math.ceil(total / columns);
+  const column = index % columns;
+  const row = Math.floor(index / columns);
+  const x = ((column + 1) / (columns + 1)) * 100;
+  const y = ((row + 1) / (rows + 1)) * 100;
+
+  return {
+    x: clamp(x, 10, 90),
+    y: clamp(y, 14, 86),
+  };
+}
+
+function removeMissingStudentsFromTeams(teams: Team[], students: Student[]): Team[] {
+  const ids = new Set(students.map((student) => student.id));
+
+  return teams.map((team) => ({
+    ...team,
+    students: team.students.filter((student) => ids.has(student.id)),
+  }));
+}
+
+function inferAppStep(
+  raw: Partial<ClassSession> & Record<string, unknown>,
+  students: Student[],
+): ClassSession["appStep"] {
+  if (students.length > 0) {
+    return "main";
+  }
+
+  return typeof raw.className === "string" && raw.className.trim()
+    ? "students"
+    : "start";
+}
+
+function isAppStep(value: unknown): value is ClassSession["appStep"] {
+  return (
+    value === "start" ||
+    value === "class-name" ||
+    value === "students" ||
+    value === "main"
+  );
+}
+
+function isMainSection(value: unknown): value is MainSection {
+  return value === "home" || value === "actions" || value === "teams";
+}
+
+function isStageMode(value: unknown): value is StageMode {
+  return (
+    value === "dashboard" ||
+    value === "teams" ||
+    value === "topics" ||
+    value === "timer" ||
+    value === "presentation" ||
+    value === "poll" ||
+    value === "random"
+  );
 }
 
 function shuffle<T>(items: T[], random: RandomSource): T[] {
