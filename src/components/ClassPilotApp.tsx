@@ -111,18 +111,18 @@ function StartScreen({ onStart }: { onStart: () => void }) {
   const onboardingItems = [
     {
       icon: <School aria-hidden="true" size={22} />,
-      title: "수업을 먼저 세팅",
-      text: "수업명과 학생 명단만 넣으면 바로 시작합니다.",
+      title: "명단 입력",
+      text: "수업 이름을 정하고 학생을 한 명씩 추가하면 교실 보드가 만들어집니다.",
     },
     {
       icon: <MousePointer2 aria-hidden="true" size={22} />,
-      title: "교실 보드 조정",
-      text: "학생 위치와 메모를 수업 중 바로 바꿉니다.",
+      title: "자리와 학생 기록",
+      text: "학생 칩을 드래그해 배치하고 특징, 메모, 상벌점을 바로 남깁니다.",
     },
     {
       icon: <Gamepad2 aria-hidden="true" size={22} />,
-      title: "액션으로 집중",
-      text: "팀, 점수, 마블 룰렛으로 참여 흐름을 만듭니다.",
+      title: "활동 진행",
+      text: "팀 점수, 투표, 발표 순서, 타이머, 마블 룰렛을 수업 흐름에 맞춰 실행합니다.",
     },
   ];
 
@@ -134,24 +134,24 @@ function StartScreen({ onStart }: { onStart: () => void }) {
             <Sparkles aria-hidden="true" size={32} />
           </div>
           <p className="cp-eyebrow">ClassPilot</p>
-          <h1>수업 진행 보조 서비스 ClassPilot</h1>
+          <h1>ClassPilot, 수업 진행을 한 화면에서</h1>
           <p className="cp-start-description">
-            학생 명단을 넣고, 팀을 만들고, 점수와 마블 룰렛으로 수업 분위기를
-            크게 띄워보세요. 선생님 한 기기에서 조작하고 학생들은 큰 화면으로
-            바로 이해합니다.
+            학생 명단을 넣으면 자리 보드가 만들어집니다. 선생님은 팀, 점수,
+            투표, 발표 순서, 타이머, 마블 룰렛을 조작하고 학생 화면에는 보여줘도
+            되는 결과만 띄웁니다.
           </p>
           <button
             className="cp-primary-button cp-hero-button"
             onClick={onStart}
           >
-            시작하기
+            수업 만들기
             <ArrowRight aria-hidden="true" size={22} />
           </button>
         </div>
 
         <div className="cp-start-showcase" aria-hidden="true">
           <div className="cp-showcase-header">
-            <span>오늘의 교실</span>
+            <span>3반 과학 수업</span>
             <strong>LIVE</strong>
           </div>
           <div className="cp-showcase-board">
@@ -166,7 +166,7 @@ function StartScreen({ onStart }: { onStart: () => void }) {
           <div className="cp-showcase-action">
             <div>
               <TimerReset size={20} />
-              <span>05:00</span>
+              <span>타이머 05:00</span>
             </div>
             <div>
               <Trophy size={20} />
@@ -174,7 +174,7 @@ function StartScreen({ onStart }: { onStart: () => void }) {
             </div>
             <div>
               <MonitorPlay size={20} />
-              <span>마블 룰렛 준비</span>
+              <span>결과 화면 공유</span>
             </div>
           </div>
         </div>
