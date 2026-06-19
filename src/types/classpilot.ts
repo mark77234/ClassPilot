@@ -51,6 +51,13 @@ export type AppStep = "start" | "class-name" | "students" | "main";
 
 export type MainSection = "home" | "actions" | "teams";
 
+export type TeamEditorMode = "random" | "manual" | "edit";
+
+export type TeamDragPayload = {
+  studentId: string;
+  fromTeamId?: string;
+};
+
 export type ActionId =
   | "team-maker"
   | "topic-assignment"
@@ -69,8 +76,19 @@ export type PollTarget = "team" | "student";
 
 export type DrawTarget = "team" | "student";
 
-export type MiniGameMode =
-  | "marble-roulette";
+export type MiniGameMode = "marble-roulette";
+
+export type MarbleRacePhase = "idle" | "generated" | "running" | "finished";
+
+export type MarbleBallState = {
+  id: string;
+  name: string;
+  type: DrawTarget;
+  color: string;
+  status: "ready" | "running" | "finished" | "restarted";
+  rank?: number;
+  resets: number;
+};
 
 export type ScoreEvent = {
   id: string;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   addStudentPointEvent,
   addScoreEvent,
+  addTeam,
   assignTopicToTeam,
   createDefaultStudentPosition,
   createEmptySession,
@@ -11,9 +12,13 @@ import {
   createStudents,
   createTeams,
   createTopics,
+  deleteTeamFromSession,
   findStudentAtPosition,
+  getActionCompleteSection,
   getPollTotalVotes,
+  getUnassignedStudents,
   getWinnerTeam,
+  moveStudentToTeam,
   normalizeSession,
   pickRandomStudent,
   changePollVote,
@@ -77,6 +82,69 @@ describe("classpilot utilities", () => {
       ["B", "D"],
       ["A", "C"],
     ]);
+  });
+
+  it("adds a new empty team without moving students", () => {
+    const students = createStudents(["A", "B", "C", "D"]);
+    const teams = createTeams(students, 2, randomValues([0.5]));
+    const updated = addTeam(teams);
+
+    expect(updated).toHaveLength(3);
+    expect(updated[2].students).toEqual([]);
+    expect(updated.flatMap((team) => team.students)).toHaveLength(4);
+  });
+
+  it("deletes a team and leaves its students unassigned", () => {
+    const students = createStudents(["A", "B", "C", "D"]);
+    const teams = createTeams(students, 2, randomValues([0.5]));
+    const session = {
+      ...createEmptySession(),
+      students,
+      teams,
+      presentationOrder: teams,
+    };
+
+    const updated = deleteTeamFromSession(session, teams[0].id);
+
+    expect(updated.teams).toHaveLength(1);
+    expect(updated.presentationOrder.map((team) => team.id)).not.toContain(
+      teams[0].id,
+    );
+    expect(getUnassignedStudents(updated.students, updated.teams)).toEqual(
+      teams[0].students,
+    );
+  });
+
+  it("moves students between teams and unassigned area without duplication", () => {
+    const students = createStudents(["A", "B", "C", "D"]);
+    const teams = createTeams(students, 2, randomValues([0.5]));
+    const studentId = teams[0].students[0].id;
+
+    const movedToOtherTeam = moveStudentToTeam(
+      teams,
+      students,
+      studentId,
+      teams[1].id,
+      0,
+    );
+    expect(movedToOtherTeam[1].students[0].id).toBe(studentId);
+    expect(
+      movedToOtherTeam.flatMap((team) => team.students).filter((student) => student.id === studentId),
+    ).toHaveLength(1);
+
+    const movedToUnassigned = moveStudentToTeam(
+      movedToOtherTeam,
+      students,
+      studentId,
+      undefined,
+    );
+    expect(getUnassignedStudents(students, movedToUnassigned)[0].id).toBe(studentId);
+  });
+
+  it("maps action completion to the expected main section", () => {
+    expect(getActionCompleteSection("team-maker")).toBe("teams");
+    expect(getActionCompleteSection("mini-game")).toBe("home");
+    expect(getActionCompleteSection("reward")).toBe("teams");
   });
 
   it("assigns a topic directly to a selected team", () => {

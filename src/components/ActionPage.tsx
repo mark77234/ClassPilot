@@ -4,24 +4,35 @@ import {
   ArrowLeft,
   BarChart3,
   Clock3,
+  CheckCircle2,
   Dice5,
   ListOrdered,
   Pause,
   Play,
+  Plus,
   RefreshCw,
   Rocket,
   Save,
   Shuffle,
   Sparkles,
+  Trash2,
   Trophy,
   UsersRound,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from "react";
 import { MarbleRouletteGame } from "@/components/MarbleRouletteGame";
 import { useClassSession } from "@/hooks/useClassSession";
 import {
   addScoreEvent,
+  addTeam,
   assignTopicToTeam,
   changePollVote,
   createPoll,
@@ -30,19 +41,31 @@ import {
   createManualTeams,
   createTeams,
   createTimer,
+  deleteTeamFromSession,
   finishSession,
   formatEventTime,
   formatTime,
+  getActionCompleteSection,
   getActionDefinition,
+  getUnassignedStudents,
   getPollTotalVotes,
   getRankedTeams,
   getWinnerTeam,
   isActionId,
+  moveStudentToTeam,
   pickRandomStudent,
   renameTeam,
   withSessionUpdate,
 } from "@/lib/classpilot";
-import type { ActionId, ClassSession, Poll, Team } from "@/types/classpilot";
+import type {
+  ActionId,
+  ClassSession,
+  Poll,
+  Student,
+  Team,
+  TeamDragPayload,
+  TeamEditorMode,
+} from "@/types/classpilot";
 
 type ActionPageProps = {
   actionId: string;
@@ -50,6 +73,7 @@ type ActionPageProps = {
 
 export function ActionPage({ actionId }: ActionPageProps) {
   const { hydrated, session, setSession, updateSession } = useClassSession();
+  const router = useRouter();
 
   useEffect(() => {
     if (!session.timer.running) {
@@ -99,7 +123,20 @@ export function ActionPage({ actionId }: ActionPageProps) {
     );
   }
 
-  const action = getActionDefinition(actionId);
+  const validActionId: ActionId = actionId;
+  const action = getActionDefinition(validActionId);
+
+  function handleComplete() {
+    const mainSection = getActionCompleteSection(validActionId);
+
+    setSession((current) =>
+      withSessionUpdate(current, {
+        mainSection,
+        stageMode: mainSection === "teams" ? "teams" : current.stageMode,
+      }),
+    );
+    router.push("/");
+  }
 
   if (session.appStep !== "main") {
     return (
@@ -114,35 +151,39 @@ export function ActionPage({ actionId }: ActionPageProps) {
   }
 
   return (
-    <ActionShell session={session} title={action?.title ?? "액션"}>
-      {actionId === "team-maker" && (
+    <ActionShell
+      onComplete={handleComplete}
+      session={session}
+      title={action?.title ?? "액션"}
+    >
+      {validActionId === "team-maker" && (
         <TeamMakerAction session={session} setSession={setSession} />
       )}
-      {actionId === "topic-assignment" && (
+      {validActionId === "topic-assignment" && (
         <TopicAssignmentAction session={session} setSession={setSession} />
       )}
-      {actionId === "timer" && (
+      {validActionId === "timer" && (
         <TimerAction session={session} updateSession={updateSession} />
       )}
-      {actionId === "random-student" && (
+      {validActionId === "random-student" && (
         <RandomStudentAction session={session} updateSession={updateSession} />
       )}
-      {actionId === "presentation-order" && (
+      {validActionId === "presentation-order" && (
         <PresentationAction session={session} updateSession={updateSession} />
       )}
-      {actionId === "poll" && (
+      {validActionId === "poll" && (
         <PollAction session={session} updateSession={updateSession} />
       )}
-      {actionId === "score" && (
+      {validActionId === "score" && (
         <ScoreAction session={session} setSession={setSession} />
       )}
-      {actionId === "mini-game" && (
+      {validActionId === "mini-game" && (
         <MiniGameAction session={session} setSession={setSession} />
       )}
-      {actionId === "reward" && (
+      {validActionId === "reward" && (
         <RewardAction session={session} updateSession={updateSession} />
       )}
-      {actionId === "finale" && (
+      {validActionId === "finale" && (
         <FinaleAction session={session} setSession={setSession} />
       )}
     </ActionShell>
@@ -151,10 +192,12 @@ export function ActionPage({ actionId }: ActionPageProps) {
 
 function ActionShell({
   children,
+  onComplete,
   session,
   title,
 }: {
   children: ReactNode;
+  onComplete?: () => void;
   session: ClassSession;
   title: string;
 }) {
@@ -171,6 +214,14 @@ function ActionShell({
         </div>
       </header>
       {children}
+      {onComplete && (
+        <div className="cp-action-complete-bar">
+          <button className="cp-primary-button" onClick={onComplete} type="button">
+            <CheckCircle2 aria-hidden="true" size={20} />
+            완료
+          </button>
+        </div>
+      )}
     </main>
   );
 }
@@ -183,7 +234,9 @@ function TeamMakerAction({
   setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
 }) {
   const [teamCount, setTeamCount] = useState(Math.max(session.teams.length, 4));
-  const [mode, setMode] = useState<"random" | "manual">("random");
+  const [mode, setMode] = useState<TeamEditorMode>(
+    session.teams.length > 0 ? "edit" : "random",
+  );
   const [manualAssignments, setManualAssignments] = useState<Record<string, string>>(
     () =>
       Object.fromEntries(
@@ -204,6 +257,7 @@ function TeamMakerAction({
       name: `${index + 1}팀`,
     }),
   );
+  const unassignedStudents = getUnassignedStudents(session.students, session.teams);
 
   function handleCreateTeams() {
     setSession((current) =>
@@ -221,6 +275,75 @@ function TeamMakerAction({
         stageMode: "teams",
       }),
     );
+    setMode("edit");
+  }
+
+  function handleAddTeam() {
+    setSession((current) =>
+      withSessionUpdate(current, {
+        teams: addTeam(current.teams),
+        mainSection: "teams",
+        stageMode: "teams",
+      }),
+    );
+  }
+
+  function handleDeleteTeam(teamId: string) {
+    setSession((current) => deleteTeamFromSession(current, teamId));
+  }
+
+  function handleMoveStudent(
+    studentId: string,
+    targetTeamId?: string,
+    targetIndex?: number,
+  ) {
+    setSession((current) =>
+      withSessionUpdate(current, {
+        teams: moveStudentToTeam(
+          current.teams,
+          current.students,
+          studentId,
+          targetTeamId,
+          targetIndex,
+        ),
+        mainSection: "teams",
+        stageMode: "teams",
+      }),
+    );
+  }
+
+  function readDragPayload(event: DragEvent<HTMLElement>): TeamDragPayload | undefined {
+    const raw = event.dataTransfer.getData("application/json");
+    if (!raw) {
+      return undefined;
+    }
+
+    try {
+      const payload = JSON.parse(raw) as Partial<TeamDragPayload>;
+      return typeof payload.studentId === "string"
+        ? {
+            studentId: payload.studentId,
+            fromTeamId:
+              typeof payload.fromTeamId === "string" ? payload.fromTeamId : undefined,
+          }
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  function handleDrop(
+    event: DragEvent<HTMLElement>,
+    targetTeamId?: string,
+    targetIndex?: number,
+  ) {
+    event.preventDefault();
+    const payload = readDragPayload(event);
+    if (!payload) {
+      return;
+    }
+
+    handleMoveStudent(payload.studentId, targetTeamId, targetIndex);
   }
 
   return (
@@ -229,7 +352,13 @@ function TeamMakerAction({
         <UsersRound aria-hidden="true" size={34} />
         <div>
           <p className="cp-section-label">팀 만들기</p>
-          <h2>{mode === "random" ? "랜덤으로 팀 나누기" : "직접 팀 배정하기"}</h2>
+          <h2>
+            {mode === "random"
+              ? "랜덤으로 팀 나누기"
+              : mode === "manual"
+                ? "직접 팀 배정하기"
+                : "팀 편집 보드"}
+          </h2>
         </div>
       </div>
 
@@ -248,6 +377,14 @@ function TeamMakerAction({
         >
           직접 배정
         </button>
+        <button
+          className={mode === "edit" ? "active" : ""}
+          disabled={session.teams.length === 0}
+          onClick={() => setMode("edit")}
+          type="button"
+        >
+          편집 보드
+        </button>
       </div>
 
       <div className="cp-action-controls">
@@ -262,11 +399,18 @@ function TeamMakerAction({
         </label>
         <button
           className="cp-primary-button"
-          disabled={session.students.length === 0}
+          disabled={session.students.length === 0 || mode === "edit"}
           onClick={handleCreateTeams}
         >
           <Shuffle aria-hidden="true" size={20} />
-          {mode === "random" ? "랜덤 팀 생성" : "직접 배정 적용"}
+          {mode === "random"
+            ? "랜덤 팀 생성"
+            : mode === "manual"
+              ? "직접 배정 적용"
+              : "편집 중"}
+        </button>
+        <button className="cp-secondary-button" onClick={handleAddTeam} type="button">
+          <Plus aria-hidden="true" size={20} />팀 추가
         </button>
       </div>
 
@@ -305,29 +449,129 @@ function TeamMakerAction({
         </div>
       )}
 
-      <div className="cp-team-grid">
-        {session.teams.map((team) => (
-          <article className="cp-team-card" key={team.id}>
-            <input
-              aria-label={`${team.name} 팀 이름`}
-              className="cp-team-name-input"
-              value={team.name}
-              onChange={(event) =>
-                setSession((current) =>
-                  withSessionUpdate(current, {
-                    teams: renameTeam(current.teams, team.id, event.target.value),
-                  }),
-                )
-              }
-            />
-            <div className="cp-team-members">
-              {team.students.map((student) => student.name).join(" · ")}
+      <div className="cp-team-editor-board">
+        <section
+          className="cp-unassigned-dropzone"
+          onDragOver={(event) => event.preventDefault()}
+          onDrop={(event) => handleDrop(event)}
+        >
+          <div className="cp-editor-zone-header">
+            <div>
+              <p className="cp-section-label">미배정 학생</p>
+              <h3>{unassignedStudents.length}명</h3>
             </div>
-            <strong>{team.score}점</strong>
+          </div>
+          <div className="cp-editor-student-badges">
+            {unassignedStudents.length === 0 ? (
+              <p className="cp-empty-inline">모든 학생이 팀에 들어갔습니다.</p>
+            ) : (
+              unassignedStudents.map((student) => (
+                <TeamStudentBadge
+                  key={student.id}
+                  student={student}
+                />
+              ))
+            )}
+          </div>
+        </section>
+
+        <section className="cp-team-editor-grid">
+        {session.teams.map((team) => (
+          <article
+            className="cp-team-editor-card"
+            key={team.id}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => handleDrop(event, team.id)}
+          >
+            <div className="cp-editor-zone-header">
+              <input
+                aria-label={`${team.name} 팀 이름`}
+                className="cp-team-name-input"
+                value={team.name}
+                onChange={(event) =>
+                  setSession((current) =>
+                    withSessionUpdate(current, {
+                      teams: renameTeam(current.teams, team.id, event.target.value),
+                      mainSection: "teams",
+                      stageMode: "teams",
+                    }),
+                  )
+                }
+              />
+              <button
+                aria-label={`${team.name} 삭제`}
+                className="cp-danger-icon-button"
+                onClick={() => handleDeleteTeam(team.id)}
+                title={`${team.name} 삭제`}
+                type="button"
+              >
+                <Trash2 aria-hidden="true" size={18} />
+              </button>
+            </div>
+            <div className="cp-team-editor-meta">
+              <span>{team.students.length}명</span>
+              <strong>{team.score}점</strong>
+            </div>
+            <div className="cp-editor-student-badges">
+              {team.students.length === 0 ? (
+                <p className="cp-empty-inline">학생 배지를 여기에 놓으세요.</p>
+              ) : (
+                team.students.map((student, index) => (
+                  <TeamStudentBadge
+                    fromTeamId={team.id}
+                    key={student.id}
+                    onDrop={(event) => handleDrop(event, team.id, index)}
+                    student={student}
+                  />
+                ))
+              )}
+            </div>
           </article>
         ))}
+        </section>
       </div>
     </section>
+  );
+}
+
+function TeamStudentBadge({
+  fromTeamId,
+  onDrop,
+  student,
+}: {
+  fromTeamId?: string;
+  onDrop?: (event: DragEvent<HTMLButtonElement>) => void;
+  student: Student;
+}) {
+  return (
+    <button
+      className="cp-team-student-chip"
+      draggable
+      onDragOver={(event) => {
+        if (onDrop) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
+      }}
+      onDragStart={(event) => {
+        event.dataTransfer.effectAllowed = "move";
+        event.dataTransfer.setData(
+          "application/json",
+          JSON.stringify({ studentId: student.id, fromTeamId }),
+        );
+      }}
+      onDrop={(event) => {
+        if (!onDrop) {
+          return;
+        }
+
+        event.stopPropagation();
+        onDrop(event);
+      }}
+      type="button"
+    >
+      {student.name}
+    </button>
   );
 }
 
@@ -821,7 +1065,10 @@ function RewardAction({
         className="cp-big-input"
         placeholder="예: 간식 선택권"
         value={reward}
-        onChange={(event) => setReward(event.target.value)}
+        onChange={(event) => {
+          setReward(event.target.value);
+          updateSession({ reward: event.target.value });
+        }}
       />
       <button
         className="cp-primary-button"

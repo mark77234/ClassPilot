@@ -24,6 +24,8 @@ export type ActionDefinition = {
   detail: string;
 };
 
+export type ActionCompleteTarget = Record<ActionId, MainSection>;
+
 const TEAM_NAMES = [
   "로켓팀",
   "스파크팀",
@@ -102,6 +104,19 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
     detail: "최종 우승팀을 발표합니다.",
   },
 ];
+
+export const ACTION_COMPLETE_TARGETS: ActionCompleteTarget = {
+  "team-maker": "teams",
+  "topic-assignment": "teams",
+  timer: "home",
+  "random-student": "home",
+  "presentation-order": "home",
+  poll: "home",
+  score: "teams",
+  "mini-game": "home",
+  reward: "teams",
+  finale: "teams",
+};
 
 export function createId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${Math.random()
@@ -531,6 +546,96 @@ export function createTeams(
   return teams;
 }
 
+export function addTeam(teams: Team[]): Team[] {
+  const nextIndex = teams.length + 1;
+  const nextIdNumber =
+    Math.max(
+      0,
+      ...teams
+        .map((team) => Number(team.id.replace("team-", "")))
+        .filter(Number.isFinite),
+    ) + 1;
+
+  return [
+    ...teams,
+    {
+      id: `team-${nextIdNumber}`,
+      name: TEAM_NAMES[nextIndex - 1] ?? `${nextIndex}팀`,
+      students: [],
+      score: 0,
+    },
+  ];
+}
+
+export function deleteTeam(teams: Team[], teamId: string): Team[] {
+  return teams.filter((team) => team.id !== teamId);
+}
+
+export function deleteTeamFromSession(
+  session: ClassSession,
+  teamId: string,
+): ClassSession {
+  return withSessionUpdate(session, {
+    teams: deleteTeam(session.teams, teamId),
+    presentationOrder: session.presentationOrder.filter(
+      (team) => team.id !== teamId,
+    ),
+    finale:
+      session.finale.winnerTeamId === teamId
+        ? { finished: false }
+        : session.finale,
+  });
+}
+
+export function moveStudentToTeam(
+  teams: Team[],
+  students: Student[],
+  studentId: string,
+  targetTeamId?: string,
+  targetIndex?: number,
+): Team[] {
+  const student = students.find((item) => item.id === studentId);
+
+  if (!student) {
+    return teams;
+  }
+
+  const teamsWithoutStudent = teams.map((team) => ({
+    ...team,
+    students: team.students.filter((item) => item.id !== studentId),
+  }));
+
+  if (!targetTeamId) {
+    return teamsWithoutStudent;
+  }
+
+  return teamsWithoutStudent.map((team) => {
+    if (team.id !== targetTeamId) {
+      return team;
+    }
+
+    const nextStudents = [...team.students];
+    const insertIndex =
+      typeof targetIndex === "number"
+        ? clamp(Math.floor(targetIndex), 0, nextStudents.length)
+        : nextStudents.length;
+    nextStudents.splice(insertIndex, 0, student);
+
+    return {
+      ...team,
+      students: nextStudents,
+    };
+  });
+}
+
+export function getUnassignedStudents(students: Student[], teams: Team[]): Student[] {
+  const assignedIds = new Set(
+    teams.flatMap((team) => team.students.map((student) => student.id)),
+  );
+
+  return students.filter((student) => !assignedIds.has(student.id));
+}
+
 export function createManualTeams(
   students: Student[],
   teamCount: number,
@@ -721,6 +826,10 @@ export function finishSession(session: ClassSession): ClassSession {
 
 export function getActionDefinition(actionId: string): ActionDefinition | undefined {
   return ACTION_DEFINITIONS.find((action) => action.id === actionId);
+}
+
+export function getActionCompleteSection(actionId: ActionId): MainSection {
+  return ACTION_COMPLETE_TARGETS[actionId];
 }
 
 export function isActionId(actionId: string): actionId is ActionId {

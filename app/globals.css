@@ -918,6 +918,7 @@ button:disabled {
 .cp-action-screen {
   max-width: 1160px;
   margin: 0 auto;
+  padding-bottom: calc(118px + env(safe-area-inset-bottom));
   width: 100%;
 }
 
@@ -953,6 +954,28 @@ button:disabled {
 
 .cp-action-controls.stretch {
   align-items: stretch;
+}
+
+.cp-action-complete-bar {
+  position: sticky;
+  z-index: 20;
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: flex-end;
+  justify-self: end;
+  width: min(100%, 460px);
+  padding: 10px;
+  border: 1px solid rgba(206, 217, 228, 0.9);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 16px 40px rgba(54, 46, 33, 0.14);
+  backdrop-filter: blur(14px);
+}
+
+.cp-action-complete-bar .cp-primary-button {
+  min-height: 56px;
+  width: 100%;
+  font-size: 18px;
 }
 
 .cp-quick-score-row {
@@ -1069,6 +1092,129 @@ button:disabled {
   background: #e8eef4;
   color: var(--ink);
   font-weight: 900;
+}
+
+.cp-team-editor-board {
+  display: grid;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(36, 107, 75, 0.07), transparent 38%),
+    #f8fbff;
+}
+
+.cp-unassigned-dropzone,
+.cp-team-editor-card {
+  min-width: 0;
+  border: 2px dashed rgba(36, 95, 143, 0.22);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.cp-unassigned-dropzone {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+}
+
+.cp-editor-zone-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.cp-editor-zone-header h3 {
+  margin: 2px 0 0;
+  font-size: 24px;
+}
+
+.cp-team-editor-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 14px;
+}
+
+.cp-team-editor-card {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  min-height: 220px;
+  padding: 14px;
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    transform 180ms ease;
+}
+
+.cp-team-editor-card:hover,
+.cp-unassigned-dropzone:hover {
+  border-color: rgba(36, 107, 75, 0.55);
+  box-shadow: 0 12px 28px rgba(54, 46, 33, 0.08);
+}
+
+.cp-team-editor-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 40px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eaf1f7;
+  color: var(--muted);
+  font-weight: 900;
+}
+
+.cp-team-editor-meta strong {
+  color: var(--orange);
+  font-size: 20px;
+}
+
+.cp-editor-student-badges {
+  display: flex;
+  align-content: flex-start;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 78px;
+}
+
+.cp-team-student-chip {
+  min-height: 42px;
+  max-width: 100%;
+  padding: 0 13px;
+  border: 2px solid rgba(36, 107, 75, 0.18);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--green-dark);
+  font-weight: 1000;
+  overflow-wrap: anywhere;
+  box-shadow: 0 8px 20px rgba(54, 46, 33, 0.08);
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.cp-team-student-chip:hover,
+.cp-team-student-chip:focus-visible {
+  border-color: var(--green);
+  background: var(--gold-soft);
+  transform: translateY(-2px);
+}
+
+.cp-danger-icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 8px;
+  background: #f9dce2;
+  color: var(--rose);
 }
 
 .cp-focus-action {
@@ -1274,29 +1420,38 @@ button:disabled {
 
 .cp-marble-arena {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(250px, 320px);
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 360px);
   gap: 14px;
   align-items: stretch;
 }
 
 .cp-marble-physics-board {
   position: relative;
-  min-height: 540px;
+  min-height: 620px;
   overflow: hidden;
   border: 2px solid #b9c8d7;
   border-radius: 8px;
   background:
     linear-gradient(180deg, rgba(36, 95, 143, 0.11), transparent 44%),
     linear-gradient(90deg, rgba(36, 95, 143, 0.07) 1px, transparent 1px),
+    linear-gradient(180deg, rgba(36, 95, 143, 0.05) 1px, transparent 1px),
     #ffffff;
-  background-size: auto, 54px 54px, auto;
+  background-size: auto, 54px 54px, 54px 54px, auto;
   box-shadow: inset 0 0 0 6px rgba(255, 255, 255, 0.56);
+}
+
+.cp-marble-canvas-mount {
+  position: absolute;
+  inset: 0;
+  min-width: 100%;
+  min-height: 100%;
 }
 
 .cp-marble-physics-board canvas {
   display: block;
   width: 100% !important;
-  height: 100% !important;
+  max-width: none;
+  will-change: transform;
 }
 
 .cp-marble-placeholder {
@@ -1321,8 +1476,10 @@ button:disabled {
 .cp-marble-result-board {
   display: grid;
   align-content: start;
-  gap: 12px;
+  gap: 14px;
   min-width: 0;
+  max-height: 620px;
+  overflow: auto;
   padding: 18px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -1336,7 +1493,68 @@ button:disabled {
   line-height: 1;
 }
 
-.cp-marble-result-board ol {
+.cp-marble-focus {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--gold-soft);
+}
+
+.cp-marble-focus span {
+  color: #70500b;
+  font-size: 13px;
+  font-weight: 1000;
+}
+
+.cp-marble-focus strong {
+  color: var(--green-dark);
+  font-size: 24px;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.cp-marble-legend,
+.cp-marble-results,
+.cp-marble-event-log {
+  display: grid;
+  gap: 8px;
+}
+
+.cp-marble-legend-row {
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 42px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #eaf1f7;
+  animation: cp-pop 240ms ease both;
+}
+
+.cp-marble-color-dot {
+  width: 18px;
+  height: 18px;
+  border: 3px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px rgba(24, 32, 27, 0.12);
+}
+
+.cp-marble-legend-row strong {
+  overflow-wrap: anywhere;
+}
+
+.cp-marble-legend-row em {
+  color: var(--blue);
+  font-size: 13px;
+  font-style: normal;
+  font-weight: 1000;
+  white-space: nowrap;
+}
+
+.cp-marble-results ol {
   display: grid;
   gap: 8px;
   margin: 0;
@@ -1344,7 +1562,7 @@ button:disabled {
   list-style: none;
 }
 
-.cp-marble-result-board li {
+.cp-marble-results li {
   display: grid;
   grid-template-columns: 40px minmax(0, 1fr) 56px;
   gap: 10px;
@@ -1356,7 +1574,7 @@ button:disabled {
   animation: cp-pop 320ms ease both;
 }
 
-.cp-marble-result-board li span {
+.cp-marble-results li span {
   display: grid;
   place-items: center;
   width: 34px;
@@ -1366,16 +1584,31 @@ button:disabled {
   font-weight: 1000;
 }
 
-.cp-marble-result-board li strong {
+.cp-marble-results li strong {
   overflow-wrap: anywhere;
 }
 
-.cp-marble-result-board li em {
+.cp-marble-results li em {
   justify-self: end;
   color: var(--orange);
   font-size: 20px;
   font-style: normal;
   font-weight: 1000;
+}
+
+.cp-marble-event-log {
+  max-height: 180px;
+  overflow: auto;
+}
+
+.cp-marble-event-log span {
+  min-height: 34px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #f8fbff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .cp-finale-panel {
