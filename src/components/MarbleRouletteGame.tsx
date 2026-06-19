@@ -59,6 +59,7 @@ const PLACE_POINTS = [30, 25, 20, 15, 10, 8, 6, 4, 3, 2];
 const WORLD_HEIGHT = 4200;
 const MIN_VIEWPORT_SIZE = 320;
 const FINISH_THRESHOLD = 184;
+const STICKY_PIN_LABEL = "sticky-pin";
 
 export function MarbleRouletteGame({
   session,
@@ -144,7 +145,7 @@ export function MarbleRouletteGame({
     );
     const width = viewportSize;
     const engine = Matter.Engine.create();
-    engine.timing.timeScale = 0.38;
+    engine.timing.timeScale = 0.58;
     engine.gravity.y = 0;
 
     const render = Matter.Render.create({
@@ -152,23 +153,34 @@ export function MarbleRouletteGame({
       engine,
       options: {
         background: "transparent",
-        height: WORLD_HEIGHT,
-        pixelRatio: window.devicePixelRatio,
+        hasBounds: true,
+        height: viewportSize,
+        pixelRatio: Math.min(window.devicePixelRatio || 1, 2),
         showAngleIndicator: false,
         wireframes: false,
         width,
       },
     });
     render.canvas.style.width = `${width}px`;
-    render.canvas.style.height = `${WORLD_HEIGHT}px`;
+    render.canvas.style.height = `${viewportSize}px`;
     render.canvas.style.transformOrigin = "top left";
+    render.bounds.min.x = 0;
+    render.bounds.max.x = width;
+    render.bounds.min.y = 0;
+    render.bounds.max.y = viewportSize;
 
     const runner = Matter.Runner.create();
     const finishedBodies = new Set<number>();
     const bodyByCandidateId = new Map<string, Matter.Body>();
     const runtimeByBodyId = new Map<number, BallRuntimeState>();
+    const stickyConstraints = new Map<
+      number,
+      { constraint: Matter.Constraint; timer: number }
+    >();
+    const stickyCooldownUntil = new Map<string, number>();
     let released = false;
     let assistEnabled = false;
+    let cameraY = 0;
     let lastFocusId = "";
     let manualFocusBodyId: number | undefined;
     let manualFocusUntil = 0;
@@ -181,9 +193,9 @@ export function MarbleRouletteGame({
       const startY = 74 + (index % 3) * 12;
       const ball = Matter.Bodies.circle(startX, startY, 19, {
         friction: 0.008,
-        frictionAir: 0.035,
+        frictionAir: 0.024,
         label: `marble-${candidate.id}`,
-        restitution: 0.62,
+        restitution: 0.76,
         render: {
           fillStyle: color,
           lineWidth: 4,
@@ -239,6 +251,7 @@ export function MarbleRouletteGame({
       }
 
       finishedBodies.add(body.id);
+      releaseStickyConstraint(body.id);
       const rank = finishedBodies.size;
       const points = PLACE_POINTS[rank - 1] ?? 1;
 
@@ -296,12 +309,13 @@ export function MarbleRouletteGame({
       runtime.lastActiveAt = performance.now();
       runtime.lastPosition = { x: resetX, y: resetY };
 
+      releaseStickyConstraint(body.id);
       Matter.Body.setPosition(body, { x: resetX, y: resetY });
       Matter.Body.setVelocity(body, {
-        x: (Math.random() - 0.5) * 0.85,
-        y: 0.95,
+        x: 0,
+        y: 1.35,
       });
-      Matter.Body.setAngularVelocity(body, (Math.random() - 0.5) * 0.025);
+      Matter.Body.setAngularVelocity(body, 0);
       updateBallState(runtime.id, (state) => ({
         ...state,
         resets: runtime.resets,
@@ -310,10 +324,66 @@ export function MarbleRouletteGame({
       appendLog(`${runtime.name} 재출발`);
     }
 
-    function focusCameraOnBody(body: Matter.Body) {
+    function releaseStickyConstraint(bodyId: number) {
+      const stickyState = stickyConstraints.get(bodyId);
+
+      if (!stickyState) {
+        return;
+      }
+
+      window.clearTimeout(stickyState.timer);
+      Matter.Composite.remove(engine.world, stickyState.constraint);
+      stickyConstraints.delete(bodyId);
+    }
+
+    function attachStickyPin(ball: Matter.Body, stickyPin: Matter.Body) {
+      if (!released || finishedBodies.has(ball.id) || stickyConstraints.has(ball.id)) {
+        return;
+      }
+
+      const runtime = runtimeByBodyId.get(ball.id);
+      if (!runtime) {
+        return;
+      }
+
+      const cooldownKey = `${ball.id}:${stickyPin.id}`;
+      const now = performance.now();
+      if ((stickyCooldownUntil.get(cooldownKey) ?? 0) > now) {
+        return;
+      }
+
+      Matter.Body.setVelocity(ball, { x: 0, y: 0.04 });
+      Matter.Body.setAngularVelocity(ball, 0);
+      const constraint = Matter.Constraint.create({
+        bodyA: stickyPin,
+        bodyB: ball,
+        damping: 0.22,
+        length: 28,
+        render: { visible: false },
+        stiffness: 0.72,
+      });
+      Matter.Composite.add(engine.world, constraint);
+      appendLog(`${runtime.name} 끈끈이 장애물`);
+
+      const timer = window.setTimeout(() => {
+        Matter.Composite.remove(engine.world, constraint);
+        stickyConstraints.delete(ball.id);
+        stickyCooldownUntil.set(cooldownKey, performance.now() + 2600);
+
+        if (finishedBodies.has(ball.id)) {
+          return;
+        }
+
+        Matter.Body.setVelocity(ball, { x: 0, y: 1.48 });
+      }, 900 + Math.random() * 900);
+
+      stickyConstraints.set(ball.id, { constraint, timer });
+    }
+
+    function focusCameraOnBody(body: Matter.Body, forceFocusUpdate = false) {
       const runtime = runtimeByBodyId.get(body.id);
 
-      if (runtime && runtime.id !== lastFocusId) {
+      if (runtime && (forceFocusUpdate || runtime.id !== lastFocusId)) {
         lastFocusId = runtime.id;
         setFocusedBallId(runtime.id);
       }
@@ -323,7 +393,9 @@ export function MarbleRouletteGame({
         0,
         WORLD_HEIGHT - viewportSize,
       );
-      render.canvas.style.transform = `translateY(${-targetCameraY}px)`;
+      cameraY = targetCameraY;
+      render.bounds.min.y = targetCameraY;
+      render.bounds.max.y = targetCameraY + viewportSize;
     }
 
     function updateCamera() {
@@ -357,16 +429,30 @@ export function MarbleRouletteGame({
 
     Matter.Composite.add(engine.world, [...trackBodies, finishSensor, ...balls]);
     Matter.Events.on(render, "afterRender", () => {
-      drawBallLabels(render.context, balls, runtimeByBodyId, finishedBodies);
+      drawBallLabels(
+        render.context,
+        balls,
+        runtimeByBodyId,
+        finishedBodies,
+        cameraY,
+        viewportSize,
+      );
     });
     Matter.Events.on(engine, "collisionStart", (event) => {
       event.pairs.forEach((pair) => {
         const pairBodies = [pair.bodyA, pair.bodyB];
         const hitSensor = pairBodies.some((body) => body.label === "finish-sensor");
         const ball = pairBodies.find((body) => runtimeByBodyId.has(body.id));
+        const stickyPin = pairBodies.find((body) =>
+          body.label.startsWith(STICKY_PIN_LABEL),
+        );
 
         if (hitSensor && ball) {
           finishBall(ball);
+        }
+
+        if (ball && stickyPin) {
+          attachStickyPin(ball, stickyPin);
         }
       });
     });
@@ -405,18 +491,10 @@ export function MarbleRouletteGame({
           return;
         }
 
-        const windDirection = Math.sin(now / 650 + index) * 0.0027;
         Matter.Body.applyForce(ball, ball.position, {
-          x: windDirection * 0.1 + (Math.random() - 0.5) * 0.0001,
-          y: assistEnabled ? 0.0018 : 0.00055,
+          x: 0,
+          y: assistEnabled ? 0.0025 : 0.0009,
         });
-
-        if (ball.position.x < 56 || ball.position.x > width - 56) {
-          Matter.Body.applyForce(ball, ball.position, {
-            x: ball.position.x < 56 ? 0.001 : -0.001,
-            y: 0.0002,
-          });
-        }
       });
 
       if (released) {
@@ -451,6 +529,10 @@ export function MarbleRouletteGame({
         if (assistTimer !== undefined) {
           window.clearTimeout(assistTimer);
         }
+        stickyConstraints.forEach((stickyState) => {
+          window.clearTimeout(stickyState.timer);
+        });
+        stickyConstraints.clear();
         Matter.Render.stop(render);
         Matter.Runner.stop(runner);
         Matter.World.clear(engine.world, false);
@@ -467,7 +549,7 @@ export function MarbleRouletteGame({
 
         manualFocusBodyId = body.id;
         manualFocusUntil = performance.now() + 3500;
-        focusCameraOnBody(body);
+        focusCameraOnBody(body, true);
       },
       release: () => {
         if (released) {
@@ -481,7 +563,7 @@ export function MarbleRouletteGame({
         );
         appendLog("공을 떨어뜨렸습니다");
         const releasedAt = performance.now();
-        engine.gravity.y = 0.16;
+        engine.gravity.y = 0.25;
         assistTimer = window.setTimeout(() => {
           if (!released || finishedBodies.size === candidates.length) {
             return;
@@ -499,10 +581,10 @@ export function MarbleRouletteGame({
           }
 
           Matter.Body.setVelocity(ball, {
-            x: (Math.random() - 0.5) * 0.7,
-            y: 0.35 + (index % 4) * 0.05,
+            x: 0,
+            y: 0.75 + (index % 4) * 0.05,
           });
-          Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.025);
+          Matter.Body.setAngularVelocity(ball, 0);
         });
       },
     };
@@ -717,48 +799,97 @@ export function MarbleRouletteGame({
 }
 
 function createTrackBodies(Matter: typeof import("matter-js"), width: number) {
-  const wallOptions = {
+  const sideWallOptions = {
+    friction: 0,
+    isStatic: true,
+    restitution: 1.08,
+    render: {
+      fillStyle: "#14324a",
+      lineWidth: 2,
+      strokeStyle: "#d7e8f2",
+    },
+  };
+  const floorOptions = {
     friction: 0.02,
     isStatic: true,
     render: { fillStyle: "#173a52" },
   };
   const bodies = [
-    Matter.Bodies.rectangle(-24, WORLD_HEIGHT / 2, 48, WORLD_HEIGHT, wallOptions),
+    Matter.Bodies.rectangle(10, WORLD_HEIGHT / 2, 20, WORLD_HEIGHT, {
+      ...sideWallOptions,
+      label: "left-bounce-wall",
+    }),
     Matter.Bodies.rectangle(
-      width + 24,
+      width - 10,
       WORLD_HEIGHT / 2,
-      48,
+      20,
       WORLD_HEIGHT,
-      wallOptions,
+      {
+        ...sideWallOptions,
+        label: "right-bounce-wall",
+      },
     ),
     Matter.Bodies.rectangle(
       width / 2,
       WORLD_HEIGHT + 24,
       width + 120,
       48,
-      wallOptions,
+      floorOptions,
     ),
   ];
-  const pinRows = Math.floor((WORLD_HEIGHT - 760) / 190);
-  for (let row = 0; row < pinRows; row += 1) {
-    const y = 620 + row * 190;
-    const count = row % 2 === 0 ? 5 : 6;
+  let row = 0;
+  for (let y = 350; y < WORLD_HEIGHT - 390; y += 142 + Math.random() * 64) {
+    const count = 3 + Math.floor(Math.random() * 4);
     const gap = width / (count + 1);
+    const rowShift = (Math.random() - 0.5) * gap * 0.34;
 
     for (let column = 0; column < count; column += 1) {
+      const roll = Math.random();
+      const role =
+        roll > 0.84 ? "sticky" : roll > 0.63 ? "bumper" : "normal";
+      const radius =
+        role === "bumper" ? 18 : role === "sticky" ? 17 : 10 + Math.random() * 5;
+      const x = clamp(
+        gap * (column + 1) + rowShift + (Math.random() - 0.5) * gap * 0.42,
+        58,
+        width - 58,
+      );
+      const pinY = y + (Math.random() - 0.5) * 42;
+      const label =
+        role === "sticky"
+          ? `${STICKY_PIN_LABEL}-${row}-${column}`
+          : role === "bumper"
+            ? `bumper-pin-${row}-${column}`
+            : `normal-pin-${row}-${column}`;
+
       bodies.push(
-        Matter.Bodies.circle(gap * (column + 1), y + (column % 2) * 24, 13, {
-          friction: 0,
+        Matter.Bodies.circle(x, pinY, radius, {
+          friction: role === "sticky" ? 0.08 : 0,
           isStatic: true,
-          restitution: 0.92,
+          label,
+          restitution:
+            role === "bumper" ? 1.42 : role === "sticky" ? 0.12 : 0.88,
           render: {
-            fillStyle: row % 2 === 0 ? "#c8d7e3" : "#9fb5c7",
-            strokeStyle: "#ffffff",
-            lineWidth: 2,
+            fillStyle:
+              role === "bumper"
+                ? "#f0a33a"
+                : role === "sticky"
+                  ? "#2f7d62"
+                  : row % 2 === 0
+                    ? "#c8d7e3"
+                    : "#9fb5c7",
+            strokeStyle:
+              role === "bumper"
+                ? "#fff1c7"
+                : role === "sticky"
+                  ? "#c6f1d8"
+                  : "#ffffff",
+            lineWidth: role === "normal" ? 2 : 4,
           },
         }),
       );
     }
+    row += 1;
   }
 
   return bodies;
@@ -769,6 +900,8 @@ function drawBallLabels(
   balls: Matter.Body[],
   runtimeByBodyId: Map<number, BallRuntimeState>,
   finishedBodies: Set<number>,
+  cameraY: number,
+  viewportSize: number,
 ) {
   context.save();
   context.textAlign = "center";
@@ -780,9 +913,14 @@ function drawBallLabels(
       return;
     }
 
+    const screenY = ball.position.y - cameraY;
+    if (screenY < -40 || screenY > viewportSize + 40) {
+      return;
+    }
+
     const label = shortenName(runtime.name);
     context.save();
-    context.translate(ball.position.x, ball.position.y);
+    context.translate(ball.position.x, screenY);
     context.rotate(ball.angle);
     context.fillStyle = "#ffffff";
     context.strokeStyle = "rgba(18, 30, 38, 0.55)";
@@ -799,24 +937,24 @@ function drawBallLabels(
 function pickRaceEvent() {
   const events = [
     {
-      label: "왼쪽 바람 구간",
-      x: (index: number) => -0.00032 - (index % 2) * 0.0001,
-      y: 0.00018,
+      label: "낙하 속도 상승",
+      x: (_index: number) => 0,
+      y: 0.00032,
     },
     {
-      label: "오른쪽 바람 구간",
-      x: (index: number) => 0.00032 + (index % 2) * 0.0001,
-      y: 0.00018,
+      label: "중력 가속 구간",
+      x: (_index: number) => 0,
+      y: 0.00048,
     },
     {
-      label: "느린 가속 구간",
-      x: (index: number) => (index % 2 === 0 ? 0.00016 : -0.00016),
-      y: 0.00055,
+      label: "탄성 범퍼 흐름",
+      x: (_index: number) => 0,
+      y: 0.0002,
     },
     {
-      label: "난류 발생",
-      x: () => (Math.random() - 0.5) * 0.00065,
-      y: 0.00028,
+      label: "핀볼 구간 진입",
+      x: (_index: number) => 0,
+      y: 0.00038,
     },
   ];
 
