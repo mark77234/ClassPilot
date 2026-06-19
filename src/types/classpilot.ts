@@ -2,6 +2,10 @@ export type Student = {
   id: string;
   name: string;
   position: StudentPosition;
+  traits: string[];
+  memo: string;
+  merit: number;
+  demerit: number;
 };
 
 export type StudentPosition = {
@@ -63,10 +67,27 @@ export type PresentationMode = "team" | "student";
 
 export type PollTarget = "team" | "student";
 
+export type DrawTarget = "team" | "student";
+
+export type MiniGameMode =
+  | "marble-roulette";
+
 export type ScoreEvent = {
   id: string;
   teamId: string;
   teamName: string;
+  points: number;
+  reason: string;
+  createdAt: number;
+};
+
+export type StudentPointKind = "merit" | "demerit";
+
+export type StudentPointEvent = {
+  id: string;
+  studentId: string;
+  studentName: string;
+  kind: StudentPointKind;
   points: number;
   reason: string;
   createdAt: number;
@@ -105,6 +126,7 @@ export type ClassSession = {
   selectedStudent?: Student;
   reward: string;
   scoreEvents: ScoreEvent[];
+  studentPointEvents: StudentPointEvent[];
   finale: FinaleState;
   updatedAt: number;
 };

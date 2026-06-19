@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { MarbleRouletteGame } from "@/components/MarbleRouletteGame";
 import { useClassSession } from "@/hooks/useClassSession";
 import {
   addScoreEvent,
@@ -26,6 +27,7 @@ import {
   createPoll,
   createPresentationOrder,
   createStudentPresentationOrder,
+  createManualTeams,
   createTeams,
   createTimer,
   finishSession,
@@ -38,7 +40,6 @@ import {
   isActionId,
   pickRandomStudent,
   renameTeam,
-  spinScoreRoulette,
   withSessionUpdate,
 } from "@/lib/classpilot";
 import type { ActionId, ClassSession, Poll, Team } from "@/types/classpilot";
@@ -182,11 +183,39 @@ function TeamMakerAction({
   setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
 }) {
   const [teamCount, setTeamCount] = useState(Math.max(session.teams.length, 4));
+  const [mode, setMode] = useState<"random" | "manual">("random");
+  const [manualAssignments, setManualAssignments] = useState<Record<string, string>>(
+    () =>
+      Object.fromEntries(
+        session.students.map((student, index) => [
+          student.id,
+          `team-${(index % Math.max(session.teams.length || 4, 1)) + 1}`,
+        ]),
+      ),
+  );
+  const normalizedTeamCount = Math.max(
+    1,
+    Math.min(Math.floor(teamCount), Math.max(session.students.length, 1)),
+  );
+  const manualTeamOptions = Array.from(
+    { length: normalizedTeamCount },
+    (_, index) => ({
+      id: `team-${index + 1}`,
+      name: `${index + 1}팀`,
+    }),
+  );
 
   function handleCreateTeams() {
     setSession((current) =>
       withSessionUpdate(current, {
-        teams: createTeams(current.students, teamCount),
+        teams:
+          mode === "random"
+            ? createTeams(current.students, teamCount)
+            : createManualTeams(
+                current.students,
+                teamCount,
+                manualAssignments,
+              ),
         presentationOrder: [],
         mainSection: "teams",
         stageMode: "teams",
@@ -200,8 +229,25 @@ function TeamMakerAction({
         <UsersRound aria-hidden="true" size={34} />
         <div>
           <p className="cp-section-label">팀 만들기</p>
-          <h2>학생들을 팀으로 나누기</h2>
+          <h2>{mode === "random" ? "랜덤으로 팀 나누기" : "직접 팀 배정하기"}</h2>
         </div>
+      </div>
+
+      <div className="cp-toggle-row">
+        <button
+          className={mode === "random" ? "active" : ""}
+          onClick={() => setMode("random")}
+          type="button"
+        >
+          랜덤 배정
+        </button>
+        <button
+          className={mode === "manual" ? "active" : ""}
+          onClick={() => setMode("manual")}
+          type="button"
+        >
+          직접 배정
+        </button>
       </div>
 
       <div className="cp-action-controls">
@@ -220,9 +266,44 @@ function TeamMakerAction({
           onClick={handleCreateTeams}
         >
           <Shuffle aria-hidden="true" size={20} />
-          팀 생성
+          {mode === "random" ? "랜덤 팀 생성" : "직접 배정 적용"}
         </button>
       </div>
+
+      {mode === "manual" && (
+        <div className="cp-manual-team-board">
+          <div className="cp-manual-team-strip">
+            {manualTeamOptions.map((team) => (
+              <span key={team.id}>{team.name}</span>
+            ))}
+          </div>
+          <div className="cp-student-assignment-grid">
+            {session.students.map((student, index) => (
+              <label className="cp-assignment-row" key={student.id}>
+                <strong>{student.name}</strong>
+                <select
+                  value={
+                    manualAssignments[student.id] ??
+                    `team-${(index % normalizedTeamCount) + 1}`
+                  }
+                  onChange={(event) =>
+                    setManualAssignments((current) => ({
+                      ...current,
+                      [student.id]: event.target.value,
+                    }))
+                  }
+                >
+                  {manualTeamOptions.map((team) => (
+                    <option key={team.id} value={team.id}>
+                      {team.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="cp-team-grid">
         {session.teams.map((team) => (
@@ -645,8 +726,8 @@ function ScoreAction({
       <div className="cp-action-title-row">
         <Trophy aria-hidden="true" size={34} />
         <div>
-          <p className="cp-section-label">점수 추가</p>
-          <h2>팀 점수 기록</h2>
+          <p className="cp-section-label">점수 추가/삭제</p>
+          <h2>팀 점수 가산과 감점 기록</h2>
         </div>
       </div>
 
@@ -665,6 +746,18 @@ function ScoreAction({
               onChange={(event) => setPoints(Number(event.target.value))}
             />
           </label>
+          <div className="cp-quick-score-row" aria-label="빠른 점수 선택">
+            {[10, 5, -5, -10].map((quickPoint) => (
+              <button
+                key={quickPoint}
+                onClick={() => setPoints(quickPoint)}
+                type="button"
+              >
+                {quickPoint > 0 ? "+" : ""}
+                {quickPoint}
+              </button>
+            ))}
+          </div>
           <label className="cp-field">
             이유
             <input
@@ -673,7 +766,7 @@ function ScoreAction({
             />
           </label>
           <button className="cp-primary-button" onClick={handleAddScore}>
-            점수 추가
+            기록하기
           </button>
         </div>
         <ScoreLog session={session} />
@@ -689,35 +782,23 @@ function MiniGameAction({
   session: ClassSession;
   setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
 }) {
-  const [selectedTeamId, setSelectedTeamId] = useState(session.teams[0]?.id ?? "");
-  const [spinResult, setSpinResult] = useState<number | undefined>();
-  const activeTeamId = selectedTeamId || session.teams[0]?.id || "";
-
-  function handleSpin() {
-    const points = spinScoreRoulette();
-    setSpinResult(points);
-    setSession((current) =>
-      addScoreEvent(current, activeTeamId, points, "점수 룰렛 보너스"),
-    );
-  }
-
   return (
-    <section className="cp-action-panel cp-focus-action">
-      <Rocket aria-hidden="true" size={46} />
-      <p className="cp-section-label">점수 룰렛</p>
-      <TeamRequired session={session}>
-        <TeamSelect
-          selectedTeamId={activeTeamId}
-          setSelectedTeamId={setSelectedTeamId}
-          teams={session.teams}
-        />
-        <div className={spinResult ? "cp-roulette-result pop" : "cp-roulette-result"}>
-          {spinResult ? `+${spinResult}` : "?"}
+    <section className="cp-action-panel">
+      <div className="cp-action-title-row">
+        <Rocket aria-hidden="true" size={34} />
+        <div>
+          <p className="cp-section-label">마블 룰렛</p>
+          <h2>공이 떨어지는 순서대로 점수 내기</h2>
         </div>
-        <button className="cp-primary-button" onClick={handleSpin}>
-          룰렛 돌리기
-        </button>
-      </TeamRequired>
+      </div>
+
+      <div className="cp-marble-intro">
+        팀 또는 학생마다 공 하나를 만들고, 장애물과 벽을 타고 내려온 순서대로
+        점수를 배출합니다. 팀 모드에서는 순위 점수를 팀 점수에 바로 반영할 수
+        있습니다.
+      </div>
+
+      <MarbleRouletteGame session={session} setSession={setSession} />
     </section>
   );
 }

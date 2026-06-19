@@ -16,32 +16,33 @@ export function useClassSession() {
   const [session, setSessionState] = useState<ClassSession>(() =>
     createEmptySession(),
   );
-  const [hydrated, setHydrated] = useState(false);
+  const [storageReady, setStorageReady] = useState(false);
 
   useEffect(() => {
-    const stored =
-      window.localStorage.getItem(STORAGE_KEY) ??
-      window.localStorage.getItem(LEGACY_STORAGE_KEY);
+    const stored = getStoredSession();
 
     if (stored) {
       try {
         setSessionState(normalizeSession(JSON.parse(stored)));
       } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
-        window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+        removeStoredSession();
       }
     }
 
-    setHydrated(true);
+    setStorageReady(true);
   }, []);
 
   useEffect(() => {
-    if (!hydrated) {
+    if (!storageReady) {
       return;
     }
 
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
-  }, [hydrated, session]);
+    try {
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(session));
+    } catch {
+      // Storage can be unavailable in restricted browser contexts.
+    }
+  }, [storageReady, session]);
 
   useEffect(() => {
     function handleStorage(event: StorageEvent) {
@@ -52,7 +53,7 @@ export function useClassSession() {
       try {
         setSessionState(normalizeSession(JSON.parse(event.newValue)));
       } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
+        removeStoredSession();
       }
     }
 
@@ -75,16 +76,35 @@ export function useClassSession() {
 
   const resetSession = useCallback(() => {
     const emptySession = createEmptySession();
-    window.localStorage.removeItem(STORAGE_KEY);
-    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+    removeStoredSession();
     setSessionState(emptySession);
   }, []);
 
   return {
-    hydrated,
+    hydrated: true,
     resetSession,
     session,
     setSession,
     updateSession,
   };
+}
+
+function getStoredSession(): string | null {
+  try {
+    return (
+      window.localStorage.getItem(STORAGE_KEY) ??
+      window.localStorage.getItem(LEGACY_STORAGE_KEY)
+    );
+  } catch {
+    return null;
+  }
+}
+
+function removeStoredSession() {
+  try {
+    window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
+  } catch {
+    // Ignore storage cleanup failures in restricted browser contexts.
+  }
 }

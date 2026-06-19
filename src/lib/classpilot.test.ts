@@ -1,18 +1,24 @@
 import { describe, expect, it } from "vitest";
 import {
+  addStudentPointEvent,
   addScoreEvent,
   assignTopicToTeam,
+  createDefaultStudentPosition,
   createEmptySession,
+  createManualTeams,
   createPoll,
   createPresentationOrder,
   createStudents,
   createTeams,
   createTopics,
+  findStudentAtPosition,
   getPollTotalVotes,
   getWinnerTeam,
   normalizeSession,
   pickRandomStudent,
   changePollVote,
+  swapStudentPositions,
+  updateStudentProfile,
   updateStudentPosition,
 } from "@/lib/classpilot";
 
@@ -28,6 +34,21 @@ describe("classpilot utilities", () => {
     expect(students).toHaveLength(2);
     expect(students[0].position.x).toBeGreaterThan(0);
     expect(students[0].position.y).toBeGreaterThan(0);
+    expect(students[0].traits).toEqual([]);
+    expect(students[0].memo).toBe("");
+  });
+
+  it("places the first six students as two columns and three rows", () => {
+    const positions = Array.from({ length: 6 }, (_, index) =>
+      createDefaultStudentPosition(index, 6),
+    );
+
+    expect(positions.map((position) => Math.round(position.x))).toEqual([
+      31, 70, 31, 70, 31, 70,
+    ]);
+    expect(positions.map((position) => position.y)).toEqual([
+      24, 24, 48, 48, 72, 72,
+    ]);
   });
 
   it("creates balanced random teams with zero scores", () => {
@@ -41,6 +62,21 @@ describe("classpilot utilities", () => {
     expect(teams.flatMap((team) => team.students)).toHaveLength(20);
     expect(teams.map((team) => team.students.length)).toEqual([5, 5, 5, 5]);
     expect(teams.map((team) => team.score)).toEqual([0, 0, 0, 0]);
+  });
+
+  it("creates teams from manual student assignments", () => {
+    const students = createStudents(["A", "B", "C", "D"]);
+    const teams = createManualTeams(students, 2, {
+      [students[0].id]: "team-2",
+      [students[1].id]: "team-1",
+      [students[2].id]: "team-2",
+      [students[3].id]: "team-1",
+    });
+
+    expect(teams.map((team) => team.students.map((student) => student.name))).toEqual([
+      ["B", "D"],
+      ["A", "C"],
+    ]);
   });
 
   it("assigns a topic directly to a selected team", () => {
@@ -61,6 +97,38 @@ describe("classpilot utilities", () => {
 
     expect(updated[0].position).toEqual({ x: 96, y: 8 });
     expect(updated[1].position).toEqual(students[1].position);
+  });
+
+  it("swaps student positions when dropped over another student", () => {
+    const students = createStudents(["A", "B"]);
+    const updated = swapStudentPositions(students, students[0].id, students[1].id);
+
+    expect(updated[0].position).toEqual(students[1].position);
+    expect(updated[1].position).toEqual(students[0].position);
+  });
+
+  it("finds a drop target near a student position", () => {
+    const students = createStudents(["A", "B"]);
+    const target = findStudentAtPosition(
+      students,
+      students[0].id,
+      students[1].position,
+      2,
+    );
+
+    expect(target?.id).toBe(students[1].id);
+  });
+
+  it("updates one student profile without changing others", () => {
+    const students = createStudents(["A", "B"]);
+    const updated = updateStudentProfile(students, students[0].id, {
+      traits: ["발표", " 발표 ", "도움"],
+      memo: "앞자리 선호",
+    });
+
+    expect(updated[0].traits).toEqual(["발표", "도움"]);
+    expect(updated[0].memo).toBe("앞자리 선호");
+    expect(updated[1].memo).toBe("");
   });
 
   it("creates presentation order with every team exactly once", () => {
@@ -106,6 +174,57 @@ describe("classpilot utilities", () => {
     expect(updated.scoreEvents[0].reason).toBe("발표");
   });
 
+  it("allows team score deletion through negative score events", () => {
+    const students = createStudents(["A", "B", "C", "D"]);
+    const teams = createTeams(students, 2, randomValues([0.5]));
+    const session = {
+      ...createEmptySession(),
+      students,
+      teams,
+    };
+
+    const updated = addScoreEvent(session, teams[0].id, -5, "규칙 위반");
+
+    expect(updated.teams[0].score).toBe(-5);
+    expect(updated.scoreEvents[0].points).toBe(-5);
+  });
+
+  it("adds student merit and demerit events", () => {
+    const students = createStudents(["A", "B"]);
+    const session = {
+      ...createEmptySession(),
+      students,
+    };
+
+    const withMerit = addStudentPointEvent(
+      session,
+      students[0].id,
+      "merit",
+      2,
+      "친구 도움",
+    );
+    const withDemerit = addStudentPointEvent(
+      withMerit,
+      students[0].id,
+      "demerit",
+      1,
+      "지각",
+    );
+
+    const adjusted = addStudentPointEvent(
+      withDemerit,
+      students[0].id,
+      "merit",
+      -1,
+      "정정",
+    );
+
+    expect(adjusted.students[0].merit).toBe(1);
+    expect(adjusted.students[0].demerit).toBe(1);
+    expect(adjusted.studentPointEvents).toHaveLength(3);
+    expect(adjusted.studentPointEvents[2].points).toBe(-1);
+  });
+
   it("returns the highest scoring team as winner", () => {
     const students = createStudents(["A", "B", "C", "D"]);
     const teams = createTeams(students, 2, randomValues([0.5]));
@@ -125,6 +244,8 @@ describe("classpilot utilities", () => {
     });
 
     expect(normalized.students[0].position).toBeDefined();
+    expect(normalized.students[0].traits).toEqual([]);
+    expect(normalized.studentPointEvents).toEqual([]);
     expect(normalized.teams[0].score).toBe(0);
     expect(normalized.appStep).toBe("main");
   });

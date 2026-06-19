@@ -7,6 +7,8 @@ import type {
   ScoreEvent,
   StageMode,
   Student,
+  StudentPointEvent,
+  StudentPointKind,
   StudentPosition,
   Team,
   TimerState,
@@ -77,15 +79,15 @@ export const ACTION_DEFINITIONS: ActionDefinition[] = [
   },
   {
     id: "score",
-    title: "점수 추가",
+    title: "점수 추가/삭제",
     shortTitle: "점수",
-    detail: "팀 점수와 이유를 기록합니다.",
+    detail: "팀 점수 가산과 감점을 기록합니다.",
   },
   {
     id: "mini-game",
-    title: "점수 룰렛",
-    shortTitle: "룰렛",
-    detail: "팀 보너스 점수를 뽑습니다.",
+    title: "마블 룰렛",
+    shortTitle: "마블",
+    detail: "물리 엔진으로 공을 굴려 순서대로 점수를 냅니다.",
   },
   {
     id: "reward",
@@ -128,6 +130,7 @@ export function createEmptySession(): ClassSession {
     stageMode: "dashboard",
     reward: "",
     scoreEvents: [],
+    studentPointEvents: [],
     finale: {
       finished: false,
     },
@@ -146,6 +149,10 @@ export function normalizeSession(value: unknown): ClassSession {
   const students = normalizeStudents(raw.students);
   const teams = normalizeTeams(raw.teams, students);
   const scoreEvents = normalizeScoreEvents(raw.scoreEvents);
+  const studentPointEvents = normalizeStudentPointEvents(
+    raw.studentPointEvents,
+    students,
+  );
 
   return {
     ...base,
@@ -170,6 +177,7 @@ export function normalizeSession(value: unknown): ClassSession {
     selectedStudent: normalizeSelectedStudent(raw.selectedStudent, students),
     reward: typeof raw.reward === "string" ? raw.reward : "",
     scoreEvents,
+    studentPointEvents,
     finale:
       raw.finale && typeof raw.finale === "object"
         ? {
@@ -208,11 +216,15 @@ export function parseLines(input: string): string[] {
     .filter(Boolean);
 }
 
-export function createStudent(name: string, index: number, total = 24): Student {
+export function createStudent(name: string, index: number, total = 6): Student {
   return {
     id: `student-${index + 1}-${slugify(name) || createId("name")}`,
     name,
-    position: getDefaultStudentPosition(index, total),
+    position: createDefaultStudentPosition(index, total),
+    traits: [],
+    memo: "",
+    merit: 0,
+    demerit: 0,
   };
 }
 
@@ -245,10 +257,16 @@ export function addStudentToSession(
     return session;
   }
 
-  const students = [
+  const nextStudents = [
     ...session.students,
-    createStudent(trimmedName, session.students.length, session.students.length + 1),
+    createStudent(
+      trimmedName,
+      session.students.length,
+      Math.max(session.students.length + 1, 6),
+    ),
   ];
+  const students =
+    session.appStep === "main" ? nextStudents : applyDefaultStudentPositions(nextStudents);
 
   return withSessionUpdate(session, {
     students,
@@ -274,6 +292,9 @@ export function removeStudentFromSession(
     ),
     selectedStudent:
       session.selectedStudent?.id === studentId ? undefined : session.selectedStudent,
+    studentPointEvents: session.studentPointEvents.filter(
+      (event) => event.studentId !== studentId,
+    ),
   });
 }
 
@@ -293,6 +314,174 @@ export function updateStudentPosition(
         }
       : student,
   );
+}
+
+export function createDefaultStudentPosition(
+  index: number,
+  total: number,
+): StudentPosition {
+  const safeTotal = Math.max(total, 1);
+  const groups = Math.max(1, Math.ceil(safeTotal / 6));
+  const groupIndex = Math.floor(index / 6);
+  const localIndex = index % 6;
+  const column = localIndex % 2;
+  const row = Math.floor(localIndex / 2);
+  const groupWidth = 78 / groups;
+  const x = 11 + groupIndex * groupWidth + (column + 0.5) * (groupWidth / 2);
+  const y = 24 + row * 24;
+
+  return {
+    x: clamp(x, 8, 92),
+    y: clamp(y, 14, 86),
+  };
+}
+
+export function applyDefaultStudentPositions(students: Student[]): Student[] {
+  const total = Math.max(students.length, 6);
+
+  return students.map((student, index) => ({
+    ...student,
+    position: createDefaultStudentPosition(index, total),
+  }));
+}
+
+export function swapStudentPositions(
+  students: Student[],
+  sourceId: string,
+  targetId: string,
+): Student[] {
+  if (sourceId === targetId) {
+    return students;
+  }
+
+  const source = students.find((student) => student.id === sourceId);
+  const target = students.find((student) => student.id === targetId);
+
+  if (!source || !target) {
+    return students;
+  }
+
+  return students.map((student) => {
+    if (student.id === sourceId) {
+      return { ...student, position: target.position };
+    }
+
+    if (student.id === targetId) {
+      return { ...student, position: source.position };
+    }
+
+    return student;
+  });
+}
+
+export function findStudentAtPosition(
+  students: Student[],
+  sourceId: string,
+  position: StudentPosition,
+  threshold = 8,
+): Student | undefined {
+  return students.find((student) => {
+    if (student.id === sourceId) {
+      return false;
+    }
+
+    const dx = student.position.x - position.x;
+    const dy = student.position.y - position.y;
+
+    return Math.hypot(dx, dy) <= threshold;
+  });
+}
+
+export function updateStudentProfile(
+  students: Student[],
+  studentId: string,
+  changes: {
+    memo?: string;
+    traits?: string[];
+  },
+): Student[] {
+  return students.map((student) =>
+    student.id === studentId
+      ? {
+          ...student,
+          memo: changes.memo ?? student.memo,
+          traits: changes.traits
+            ? normalizeTraitList(changes.traits)
+            : student.traits,
+        }
+      : student,
+  );
+}
+
+export function addStudentPointEvent(
+  session: ClassSession,
+  studentId: string,
+  kind: StudentPointKind,
+  points: number,
+  reason: string,
+): ClassSession {
+  const student = session.students.find((item) => item.id === studentId);
+
+  if (!student || !Number.isFinite(points)) {
+    return session;
+  }
+
+  const roundedPoints = Math.round(points);
+  const currentPoints = student[kind];
+  const nextPoints = Math.max(0, currentPoints + roundedPoints);
+  const actualPoints = nextPoints - currentPoints;
+
+  if (actualPoints === 0) {
+    return session;
+  }
+
+  const event: StudentPointEvent = {
+    id: createId("student-point"),
+    studentId,
+    studentName: student.name,
+    kind,
+    points: actualPoints,
+    reason: reason.trim() || (kind === "merit" ? "상점" : "벌점"),
+    createdAt: Date.now(),
+  };
+
+  return withSessionUpdate(session, {
+    students: session.students.map((item) =>
+      item.id === studentId
+        ? {
+            ...item,
+            [kind]: Math.max(0, item[kind] + actualPoints),
+          }
+        : item,
+    ),
+    teams: session.teams.map((team) => ({
+      ...team,
+      students: team.students.map((item) =>
+        item.id === studentId
+          ? {
+              ...item,
+              [kind]: Math.max(0, item[kind] + actualPoints),
+            }
+          : item,
+      ),
+    })),
+    studentPresentationOrder: session.studentPresentationOrder.map((item) =>
+      item.id === studentId
+        ? {
+            ...item,
+            [kind]: Math.max(0, item[kind] + actualPoints),
+          }
+        : item,
+    ),
+    selectedStudent:
+      session.selectedStudent?.id === studentId
+        ? {
+            ...session.selectedStudent,
+            [kind]: Math.max(0, session.selectedStudent[kind] + actualPoints),
+          }
+        : session.selectedStudent,
+    studentPointEvents: [...session.studentPointEvents, event],
+  });
 }
 
 export function createTopics(titles: string[]): Topic[] {
@@ -337,6 +526,35 @@ export function createTeams(
 
   shuffled.forEach((student, index) => {
     teams[index % normalizedTeamCount].students.push(student);
+  });
+
+  return teams;
+}
+
+export function createManualTeams(
+  students: Student[],
+  teamCount: number,
+  assignments: Record<string, string>,
+): Team[] {
+  if (students.length === 0) {
+    return [];
+  }
+
+  const normalizedTeamCount = clamp(Math.floor(teamCount), 1, students.length);
+  const teams = Array.from({ length: normalizedTeamCount }, (_, index) => ({
+    id: `team-${index + 1}`,
+    name: TEAM_NAMES[index] ?? `${index + 1}팀`,
+    students: [] as Student[],
+    score: 0,
+  }));
+  const teamIds = new Set(teams.map((team) => team.id));
+
+  students.forEach((student, index) => {
+    const assignedTeamId = teamIds.has(assignments[student.id])
+      ? assignments[student.id]
+      : teams[index % normalizedTeamCount].id;
+    const team = teams.find((item) => item.id === assignedTeamId) ?? teams[0];
+    team.students.push(student);
   });
 
   return teams;
@@ -473,11 +691,6 @@ export function addScoreEvent(
       finished: false,
     },
   });
-}
-
-export function spinScoreRoulette(random: RandomSource = Math.random): number {
-  const points = [5, 10, 15, 20, 25, 30];
-  return points[Math.floor(random() * points.length)];
 }
 
 export function getWinnerTeam(teams: Team[]): Team | undefined {
@@ -624,6 +837,14 @@ function normalizeStudents(value: unknown): Student[] {
         id: typeof raw.id === "string" ? raw.id : `student-${index + 1}`,
         name,
         position: normalizePosition(raw.position, index, value.length),
+        traits: Array.isArray(raw.traits)
+          ? normalizeTraitList(
+              raw.traits.filter((trait): trait is string => typeof trait === "string"),
+            )
+          : [],
+        memo: typeof raw.memo === "string" ? raw.memo : "",
+        merit: typeof raw.merit === "number" ? Math.max(0, raw.merit) : 0,
+        demerit: typeof raw.demerit === "number" ? Math.max(0, raw.demerit) : 0,
       };
     })
     .filter((student): student is Student => Boolean(student));
@@ -791,6 +1012,34 @@ function normalizeScoreEvents(value: unknown): ScoreEvent[] {
   );
 }
 
+function normalizeStudentPointEvents(
+  value: unknown,
+  students: Student[],
+): StudentPointEvent[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  const studentIds = new Set(students.map((student) => student.id));
+
+  return value.filter(
+    (item): item is StudentPointEvent =>
+      Boolean(
+        item &&
+          typeof item === "object" &&
+          typeof (item as StudentPointEvent).id === "string" &&
+          typeof (item as StudentPointEvent).studentId === "string" &&
+          studentIds.has((item as StudentPointEvent).studentId) &&
+          typeof (item as StudentPointEvent).studentName === "string" &&
+          ((item as StudentPointEvent).kind === "merit" ||
+            (item as StudentPointEvent).kind === "demerit") &&
+          typeof (item as StudentPointEvent).points === "number" &&
+          typeof (item as StudentPointEvent).reason === "string" &&
+          typeof (item as StudentPointEvent).createdAt === "number",
+      ),
+  );
+}
+
 function normalizeSelectedStudent(
   value: unknown,
   students: Student[],
@@ -821,21 +1070,7 @@ function normalizePosition(
     }
   }
 
-  return getDefaultStudentPosition(index, total);
-}
-
-function getDefaultStudentPosition(index: number, total: number): StudentPosition {
-  const columns = Math.ceil(Math.sqrt(Math.max(total, 1)));
-  const rows = Math.ceil(total / columns);
-  const column = index % columns;
-  const row = Math.floor(index / columns);
-  const x = ((column + 1) / (columns + 1)) * 100;
-  const y = ((row + 1) / (rows + 1)) * 100;
-
-  return {
-    x: clamp(x, 10, 90),
-    y: clamp(y, 14, 86),
-  };
+  return createDefaultStudentPosition(index, Math.max(total, 6));
 }
 
 function removeMissingStudentsFromTeams(teams: Team[], students: Student[]): Team[] {
@@ -845,6 +1080,23 @@ function removeMissingStudentsFromTeams(teams: Team[], students: Student[]): Tea
     ...team,
     students: team.students.filter((student) => ids.has(student.id)),
   }));
+}
+
+function normalizeTraitList(traits: string[]): string[] {
+  const seen = new Set<string>();
+
+  return traits
+    .map((trait) => trait.trim())
+    .filter(Boolean)
+    .filter((trait) => {
+      const key = trait.toLowerCase();
+      if (seen.has(key)) {
+        return false;
+      }
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 8);
 }
 
 function inferAppStep(

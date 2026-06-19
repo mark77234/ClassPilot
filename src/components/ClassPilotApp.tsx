@@ -2,10 +2,20 @@
 
 import {
   ArrowRight,
+  Edit3,
+  Gamepad2,
   Home,
+  Minus,
+  MonitorPlay,
+  MousePointer2,
+  Plus,
   Rocket,
   RotateCcw,
+  School,
   Sparkles,
+  Star,
+  StickyNote,
+  TimerReset,
   Trophy,
   UserPlus,
   UsersRound,
@@ -17,15 +27,24 @@ import { useRef, useState } from "react";
 import { useClassSession } from "@/hooks/useClassSession";
 import {
   ACTION_DEFINITIONS,
+  addStudentPointEvent,
   addStudentToSession,
-  createEmptySession,
+  findStudentAtPosition,
+  formatEventTime,
   getMainSectionLabel,
   getRankedTeams,
   removeStudentFromSession,
+  swapStudentPositions,
+  updateStudentProfile,
   updateStudentPosition,
   withSessionUpdate,
 } from "@/lib/classpilot";
-import type { ClassSession, MainSection, Student } from "@/types/classpilot";
+import type {
+  ClassSession,
+  MainSection,
+  Student,
+  StudentPosition,
+} from "@/types/classpilot";
 
 export function ClassPilotApp() {
   const { hydrated, resetSession, session, setSession, updateSession } =
@@ -36,7 +55,9 @@ export function ClassPilotApp() {
   }
 
   if (session.appStep === "start") {
-    return <StartScreen onStart={() => updateSession({ appStep: "class-name" })} />;
+    return (
+      <StartScreen onStart={() => updateSession({ appStep: "class-name" })} />
+    );
   }
 
   if (session.appStep === "class-name") {
@@ -87,18 +108,92 @@ function LoadingScreen() {
 }
 
 function StartScreen({ onStart }: { onStart: () => void }) {
+  const onboardingItems = [
+    {
+      icon: <School aria-hidden="true" size={22} />,
+      title: "수업을 먼저 세팅",
+      text: "수업명과 학생 명단만 넣으면 바로 시작합니다.",
+    },
+    {
+      icon: <MousePointer2 aria-hidden="true" size={22} />,
+      title: "교실 보드 조정",
+      text: "학생 위치와 메모를 수업 중 바로 바꿉니다.",
+    },
+    {
+      icon: <Gamepad2 aria-hidden="true" size={22} />,
+      title: "액션으로 집중",
+      text: "팀, 점수, 마블 룰렛으로 참여 흐름을 만듭니다.",
+    },
+  ];
+
   return (
     <main className="cp-screen cp-start-screen">
       <section className="cp-start-hero">
-        <div className="cp-logo-mark">
-          <Sparkles aria-hidden="true" size={32} />
+        <div className="cp-start-copy">
+          <div className="cp-logo-mark">
+            <Sparkles aria-hidden="true" size={32} />
+          </div>
+          <p className="cp-eyebrow">ClassPilot</p>
+          <h1>수업 진행 보조 서비스 ClassPilot</h1>
+          <p className="cp-start-description">
+            학생 명단을 넣고, 팀을 만들고, 점수와 마블 룰렛으로 수업 분위기를
+            크게 띄워보세요. 선생님 한 기기에서 조작하고 학생들은 큰 화면으로
+            바로 이해합니다.
+          </p>
+          <button
+            className="cp-primary-button cp-hero-button"
+            onClick={onStart}
+          >
+            시작하기
+            <ArrowRight aria-hidden="true" size={22} />
+          </button>
         </div>
-        <p className="cp-eyebrow">ClassPilot</p>
-        <h1>수업을 게임처럼 진행하는 선생님용 컨트롤 타워</h1>
-        <button className="cp-primary-button cp-hero-button" onClick={onStart}>
-          시작하기
-          <ArrowRight aria-hidden="true" size={22} />
-        </button>
+
+        <div className="cp-start-showcase" aria-hidden="true">
+          <div className="cp-showcase-header">
+            <span>오늘의 교실</span>
+            <strong>LIVE</strong>
+          </div>
+          <div className="cp-showcase-board">
+            {["김민준", "이서연", "박지호", "최하은", "정도윤", "강서준"].map(
+              (name, index) => (
+                <span key={name} style={{ animationDelay: `${index * 90}ms` }}>
+                  {name}
+                </span>
+              ),
+            )}
+          </div>
+          <div className="cp-showcase-action">
+            <div>
+              <TimerReset size={20} />
+              <span>05:00</span>
+            </div>
+            <div>
+              <Trophy size={20} />
+              <span>로켓팀 +20</span>
+            </div>
+            <div>
+              <MonitorPlay size={20} />
+              <span>마블 룰렛 준비</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section
+        className="cp-start-onboarding"
+        aria-label="ClassPilot 사용 흐름"
+      >
+        {onboardingItems.map((item, index) => (
+          <article
+            key={item.title}
+            style={{ animationDelay: `${index * 110}ms` }}
+          >
+            <div>{item.icon}</div>
+            <strong>{item.title}</strong>
+            <p>{item.text}</p>
+          </article>
+        ))}
       </section>
     </main>
   );
@@ -162,7 +257,9 @@ function StudentSetupScreen({
 }: {
   resetSession: () => void;
   session: ClassSession;
-  setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
+  setSession: (
+    updater: ClassSession | ((session: ClassSession) => ClassSession),
+  ) => void;
   updateSession: (changes: Partial<ClassSession>) => void;
 }) {
   const [studentName, setStudentName] = useState("");
@@ -174,7 +271,11 @@ function StudentSetupScreen({
 
   return (
     <main className="cp-screen cp-flow-screen">
-      <SessionHeader resetSession={resetSession} session={session} />
+      <SessionHeader
+        resetSession={resetSession}
+        session={session}
+        updateSession={updateSession}
+      />
       <section className="cp-step-panel cp-student-panel">
         <p className="cp-step-count">02</p>
         <h1>멋진 학생들 이름을 넣어주세요</h1>
@@ -187,6 +288,10 @@ function StudentSetupScreen({
             value={studentName}
             onChange={(event) => setStudentName(event.target.value)}
             onKeyDown={(event) => {
+              if (event.nativeEvent.isComposing) {
+                return;
+              }
+
               if (event.key === "Enter") {
                 event.preventDefault();
                 handleAddStudent();
@@ -250,12 +355,18 @@ function MainExperience({
 }: {
   resetSession: () => void;
   session: ClassSession;
-  setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
+  setSession: (
+    updater: ClassSession | ((session: ClassSession) => ClassSession),
+  ) => void;
   updateSession: (changes: Partial<ClassSession>) => void;
 }) {
   return (
     <main className="cp-screen cp-main-screen">
-      <SessionHeader resetSession={resetSession} session={session} />
+      <SessionHeader
+        resetSession={resetSession}
+        session={session}
+        updateSession={updateSession}
+      />
 
       <section className="cp-main-content">
         {session.mainSection === "home" && (
@@ -281,9 +392,11 @@ function MainExperience({
 function SessionHeader({
   resetSession,
   session,
+  updateSession,
 }: {
   resetSession: () => void;
   session: ClassSession;
+  updateSession?: (changes: Partial<ClassSession>) => void;
 }) {
   return (
     <header className="cp-session-header">
@@ -291,17 +404,34 @@ function SessionHeader({
         <p className="cp-eyebrow">ClassPilot</p>
         <h1>{session.className || "새 수업"}</h1>
       </div>
-      <button
-        className="cp-reset-button"
-        onClick={() => {
-          if (window.confirm("수업을 처음부터 다시 시작할까요?")) {
-            resetSession();
-          }
-        }}
-      >
-        <RotateCcw aria-hidden="true" size={18} />
-        수업 다시 시작
-      </button>
+      <div className="cp-header-actions">
+        {updateSession && (
+          <button
+            className="cp-edit-button"
+            onClick={() =>
+              updateSession({
+                appStep: "class-name",
+              })
+            }
+            type="button"
+          >
+            <Edit3 aria-hidden="true" size={18} />
+            수업 수정
+          </button>
+        )}
+        <button
+          className="cp-reset-button"
+          onClick={() => {
+            if (window.confirm("수업을 처음부터 다시 시작할까요?")) {
+              resetSession();
+            }
+          }}
+          type="button"
+        >
+          <RotateCcw aria-hidden="true" size={18} />
+          수업 다시 시작
+        </button>
+      </div>
     </header>
   );
 }
@@ -311,10 +441,19 @@ function HomeSection({
   setSession,
 }: {
   session: ClassSession;
-  setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
+  setSession: (
+    updater: ClassSession | ((session: ClassSession) => ClassSession),
+  ) => void;
 }) {
   const boardRef = useRef<HTMLDivElement>(null);
   const [draggingId, setDraggingId] = useState<string | undefined>();
+  const [dragPreview, setDragPreview] = useState<StudentPosition | undefined>();
+  const [selectedStudentId, setSelectedStudentId] = useState<
+    string | undefined
+  >(session.students[0]?.id);
+  const activeStudent =
+    session.students.find((student) => student.id === selectedStudentId) ??
+    session.students[0];
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (!draggingId || !boardRef.current) {
@@ -325,11 +464,42 @@ function HomeSection({
     const x = ((event.clientX - rect.left) / rect.width) * 100;
     const y = ((event.clientY - rect.top) / rect.height) * 100;
 
+    setDragPreview({
+      x: Math.min(Math.max(x, 4), 96),
+      y: Math.min(Math.max(y, 8), 92),
+    });
+  }
+
+  function handlePointerUp() {
+    if (!draggingId || !dragPreview) {
+      setDraggingId(undefined);
+      setDragPreview(undefined);
+      return;
+    }
+
     setSession((current) =>
       withSessionUpdate(current, {
-        students: updateStudentPosition(current.students, draggingId, { x, y }),
+        students: findStudentAtPosition(
+          current.students,
+          draggingId,
+          dragPreview,
+          10,
+        )
+          ? swapStudentPositions(
+              current.students,
+              draggingId,
+              findStudentAtPosition(
+                current.students,
+                draggingId,
+                dragPreview,
+                10,
+              )?.id ?? draggingId,
+            )
+          : updateStudentPosition(current.students, draggingId, dragPreview),
       }),
     );
+    setDraggingId(undefined);
+    setDragPreview(undefined);
   }
 
   return (
@@ -347,26 +517,44 @@ function HomeSection({
         </div>
       </section>
 
-      <section
-        className="cp-class-board"
-        ref={boardRef}
-        onPointerMove={handlePointerMove}
-        onPointerUp={() => setDraggingId(undefined)}
-        onPointerCancel={() => setDraggingId(undefined)}
-      >
-        <div className="cp-teacher-zone">선생님</div>
-        {session.students.map((student) => (
-          <DraggableStudent
-            dragging={draggingId === student.id}
-            key={student.id}
-            onPointerDown={(event) => {
-              event.currentTarget.setPointerCapture(event.pointerId);
-              setDraggingId(student.id);
-            }}
-            student={student}
-          />
-        ))}
-      </section>
+      <div className="cp-home-layout">
+        <section
+          aria-label="교실 배치 보드"
+          className="cp-class-board"
+          ref={boardRef}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerCancel={() => {
+            setDraggingId(undefined);
+            setDragPreview(undefined);
+          }}
+        >
+          <div className="cp-teacher-zone">선생님</div>
+          {session.students.map((student) => (
+            <DraggableStudent
+              dragging={draggingId === student.id}
+              key={student.id}
+              onPointerDown={(event) => {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                setSelectedStudentId(student.id);
+                setDraggingId(student.id);
+                setDragPreview(student.position);
+              }}
+              previewPosition={
+                draggingId === student.id ? dragPreview : undefined
+              }
+              selected={activeStudent?.id === student.id}
+              student={student}
+            />
+          ))}
+        </section>
+
+        <StudentDetailPanel
+          selectedStudent={activeStudent}
+          session={session}
+          setSession={setSession}
+        />
+      </div>
     </div>
   );
 }
@@ -374,24 +562,256 @@ function HomeSection({
 function DraggableStudent({
   dragging,
   onPointerDown,
+  previewPosition,
+  selected,
   student,
 }: {
   dragging: boolean;
   onPointerDown: (event: PointerEvent<HTMLButtonElement>) => void;
+  previewPosition?: StudentPosition;
+  selected: boolean;
   student: Student;
 }) {
+  const position = previewPosition ?? student.position;
+
   return (
     <button
-      className={dragging ? "cp-seat-chip dragging" : "cp-seat-chip"}
+      className={[
+        "cp-seat-chip",
+        dragging ? "dragging" : "",
+        selected ? "selected" : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       onPointerDown={onPointerDown}
       style={{
-        left: `${student.position.x}%`,
-        top: `${student.position.y}%`,
+        left: `${position.x}%`,
+        top: `${position.y}%`,
       }}
       type="button"
     >
       {student.name}
     </button>
+  );
+}
+
+function StudentDetailPanel({
+  selectedStudent,
+  session,
+  setSession,
+}: {
+  selectedStudent?: Student;
+  session: ClassSession;
+  setSession: (
+    updater: ClassSession | ((session: ClassSession) => ClassSession),
+  ) => void;
+}) {
+  const [traitInput, setTraitInput] = useState("");
+  const [pointReason, setPointReason] = useState("수업 태도");
+  const pointEvents = selectedStudent
+    ? session.studentPointEvents
+        .filter((event) => event.studentId === selectedStudent.id)
+        .slice()
+        .reverse()
+        .slice(0, 4)
+    : [];
+  const assignedTeam = selectedStudent
+    ? session.teams.find((team) =>
+        team.students.some((student) => student.id === selectedStudent.id),
+      )
+    : undefined;
+
+  if (!selectedStudent) {
+    return (
+      <aside className="cp-student-detail-panel">
+        <StickyNote aria-hidden="true" size={30} />
+        <h3>학생을 선택해주세요</h3>
+        <p>
+          교실 보드에서 학생 이름을 누르면 특징과 메모를 관리할 수 있습니다.
+        </p>
+      </aside>
+    );
+  }
+
+  function updateTraits(nextTraits: string[]) {
+    if (!selectedStudent) {
+      return;
+    }
+
+    setSession((current) =>
+      withSessionUpdate(current, {
+        students: updateStudentProfile(current.students, selectedStudent.id, {
+          traits: nextTraits,
+        }),
+      }),
+    );
+  }
+
+  function handleAddTrait() {
+    const trait = traitInput.trim();
+
+    if (!trait || !selectedStudent) {
+      return;
+    }
+
+    updateTraits([...selectedStudent.traits, trait]);
+    setTraitInput("");
+  }
+
+  function handleMemoChange(memo: string) {
+    if (!selectedStudent) {
+      return;
+    }
+
+    setSession((current) =>
+      withSessionUpdate(current, {
+        students: updateStudentProfile(current.students, selectedStudent.id, {
+          memo,
+        }),
+      }),
+    );
+  }
+
+  function handlePoint(kind: "merit" | "demerit", points: number) {
+    if (!selectedStudent) {
+      return;
+    }
+
+    setSession((current) =>
+      addStudentPointEvent(
+        current,
+        selectedStudent.id,
+        kind,
+        points,
+        pointReason,
+      ),
+    );
+  }
+
+  return (
+    <aside className="cp-student-detail-panel">
+      <div className="cp-student-detail-header">
+        <div>
+          <p className="cp-section-label">학생 메모</p>
+          <h3>{selectedStudent.name}</h3>
+          <span className="cp-student-team-pill">
+            {assignedTeam ? `${assignedTeam.name} 소속` : "팀 미배정"}
+          </span>
+        </div>
+        <div className="cp-student-point-summary">
+          <span>상 {selectedStudent.merit}</span>
+          <span>벌 {selectedStudent.demerit}</span>
+        </div>
+      </div>
+
+      <label className="cp-field cp-wide-field">
+        특징
+        <div className="cp-trait-input-row">
+          <input
+            placeholder="예: 발표 자신감"
+            value={traitInput}
+            onChange={(event) => setTraitInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                handleAddTrait();
+              }
+            }}
+          />
+          <button
+            aria-label="특징 추가"
+            className="cp-icon-command small"
+            disabled={!traitInput.trim()}
+            onClick={handleAddTrait}
+            title="특징 추가"
+            type="button"
+          >
+            <Plus aria-hidden="true" size={18} />
+          </button>
+        </div>
+      </label>
+
+      <div
+        className="cp-trait-list"
+        aria-label={`${selectedStudent.name} 특징`}
+      >
+        {selectedStudent.traits.length === 0 ? (
+          <span className="cp-empty-pill">특징 없음</span>
+        ) : (
+          selectedStudent.traits.map((trait) => (
+            <span key={trait}>
+              {trait}
+              <button
+                aria-label={`${trait} 특징 삭제`}
+                onClick={() =>
+                  updateTraits(
+                    selectedStudent.traits.filter((item) => item !== trait),
+                  )
+                }
+                title={`${trait} 삭제`}
+                type="button"
+              >
+                <X aria-hidden="true" size={13} />
+              </button>
+            </span>
+          ))
+        )}
+      </div>
+
+      <label className="cp-field cp-wide-field">
+        메모
+        <textarea
+          placeholder="관찰 메모, 자리 배치 참고사항"
+          value={selectedStudent.memo}
+          onChange={(event) => handleMemoChange(event.target.value)}
+        />
+      </label>
+
+      <label className="cp-field cp-wide-field">
+        상벌점 이유
+        <input
+          value={pointReason}
+          onChange={(event) => setPointReason(event.target.value)}
+        />
+      </label>
+
+      <div className="cp-student-point-actions">
+        <button onClick={() => handlePoint("merit", 1)} type="button">
+          <Star aria-hidden="true" size={18} />
+          상점 +1
+        </button>
+        <button onClick={() => handlePoint("merit", -1)} type="button">
+          <Minus aria-hidden="true" size={18} />
+          상점 -1
+        </button>
+        <button onClick={() => handlePoint("demerit", 1)} type="button">
+          <Plus aria-hidden="true" size={18} />
+          벌점 +1
+        </button>
+        <button onClick={() => handlePoint("demerit", -1)} type="button">
+          <Minus aria-hidden="true" size={18} />
+          벌점 -1
+        </button>
+      </div>
+
+      <div className="cp-student-point-log">
+        {pointEvents.length === 0 ? (
+          <p>상벌점 기록이 없습니다.</p>
+        ) : (
+          pointEvents.map((event) => (
+            <div key={event.id}>
+              <span>{formatEventTime(event.createdAt)}</span>
+              <strong>{event.kind === "merit" ? "상점" : "벌점"}</strong>
+              <em>
+                {event.points > 0 ? "+" : ""}
+                {event.points}
+              </em>
+              <p>{event.reason}</p>
+            </div>
+          ))
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -405,7 +825,11 @@ function ActionsSection() {
 
       <section className="cp-action-gallery" aria-label="액션 목록">
         {ACTION_DEFINITIONS.map((action, index) => (
-          <Link className="cp-action-tile" href={`/actions/${action.id}`} key={action.id}>
+          <Link
+            className="cp-action-tile"
+            href={`/actions/${action.id}`}
+            key={action.id}
+          >
             <span>{String(index + 1).padStart(2, "0")}</span>
             <strong>{action.title}</strong>
             <em>{action.detail}</em>

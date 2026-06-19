@@ -2,7 +2,7 @@
 
 ## Project Goal
 
-ClassPilot is a Korean-first classroom control tower for teachers. The MVP is a local, single-device demo with a step-by-step start flow, a draggable classroom board, action routes, team scores, and a projector-friendly display screen.
+ClassPilot is a Korean-first classroom control tower for teachers. The MVP is a local, single-device demo with a step-by-step start flow, a draggable classroom board, student notes, action routes, team scores, a physics-based marble roulette, and a projector-friendly display screen.
 
 ## Current Scope
 
@@ -16,6 +16,8 @@ ClassPilot is a Korean-first classroom control tower for teachers. The MVP is a 
 
 - The teacher screen should be big, predictable, and fast to operate during class.
 - Keep home, actions, and teams visually distinct; use the floating nav without covering content.
+- Home should prioritize the classroom board. Student chips should stay large enough for a projector but compact enough to keep the board visible.
+- Student profile data includes traits, memo, merit, demerit, and point history; keep it separate from team score history.
 - The display screen should hide teacher-only controls and show only classroom-safe output.
 - UI copy should stay Korean-first and concise.
 - Prefer clear controls: icon buttons for timer actions, numeric inputs for counts/minutes, one-at-a-time student input, direct team topic inputs, and bars for poll results.
@@ -46,12 +48,15 @@ For UI changes, manually verify:
 - 20 students can be split into 4 balanced teams.
 - Students can be added with Enter and removed from badges.
 - Student positions can be changed by drag and persist after reload.
+- Dropping one student chip on another swaps their positions.
+- Student traits, memo, merit, and demerit persist after reload.
 - Team topics can be assigned directly.
 - Presentation order includes every team or student once.
 - Timer start, pause, and reset behave correctly.
 - Random student selection only picks from the current student list.
 - Poll votes update the result bars.
-- Team score actions update scores and score history.
+- Team score actions update positive and negative scores and score history.
+- Marble roulette renders with the physics engine and returns ranked results for current teams or students.
 - Finale shows final rankings, score history, reward, and winner.
 - `/display` shows the selected stage without teacher controls.
 
