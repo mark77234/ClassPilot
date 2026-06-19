@@ -16,6 +16,8 @@ import {
   findStudentAtPosition,
   getActionCompleteSection,
   getPollTotalVotes,
+  getRankedStudents,
+  getStudentScore,
   getUnassignedStudents,
   getWinnerTeam,
   moveStudentToTeam,
@@ -291,6 +293,22 @@ describe("classpilot utilities", () => {
     expect(adjusted.students[0].demerit).toBe(1);
     expect(adjusted.studentPointEvents).toHaveLength(3);
     expect(adjusted.studentPointEvents[2].points).toBe(-1);
+  });
+
+  it("calculates and ranks student individual scores", () => {
+    const [first, second, third] = createStudents(["A", "B", "C"]);
+    const students = [
+      { ...first, merit: 2, demerit: 1 },
+      { ...second, merit: 3, demerit: 0 },
+      { ...third, merit: 1, demerit: 3 },
+    ];
+
+    expect(getStudentScore(students[0])).toBe(1);
+    expect(getRankedStudents(students).map((student) => student.name)).toEqual([
+      "B",
+      "A",
+      "C",
+    ]);
   });
 
   it("returns the highest scoring team as winner", () => {

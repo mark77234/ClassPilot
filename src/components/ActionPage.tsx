@@ -32,6 +32,7 @@ import { MarbleRouletteGame } from "@/components/MarbleRouletteGame";
 import { useClassSession } from "@/hooks/useClassSession";
 import {
   addScoreEvent,
+  addStudentPointEvent,
   addTeam,
   assignTopicToTeam,
   changePollVote,
@@ -50,6 +51,7 @@ import {
   getUnassignedStudents,
   getPollTotalVotes,
   getRankedTeams,
+  getStudentScore,
   getWinnerTeam,
   isActionId,
   moveStudentToTeam,
@@ -956,13 +958,36 @@ function ScoreAction({
   session: ClassSession;
   setSession: (updater: ClassSession | ((session: ClassSession) => ClassSession)) => void;
 }) {
+  const [scoreMode, setScoreMode] = useState<"team" | "student">(
+    session.teams.length > 0 ? "team" : "student",
+  );
   const [points, setPoints] = useState(10);
   const [reason, setReason] = useState("좋은 발표");
   const [selectedTeamId, setSelectedTeamId] = useState(session.teams[0]?.id ?? "");
+  const [selectedStudentId, setSelectedStudentId] = useState(
+    session.students[0]?.id ?? "",
+  );
   const activeTeamId = selectedTeamId || session.teams[0]?.id || "";
+  const activeStudentId = selectedStudentId || session.students[0]?.id || "";
+  const activeStudent = session.students.find(
+    (student) => student.id === activeStudentId,
+  );
 
   function handleAddScore() {
-    setSession((current) => addScoreEvent(current, activeTeamId, points, reason));
+    if (scoreMode === "team") {
+      setSession((current) => addScoreEvent(current, activeTeamId, points, reason));
+      return;
+    }
+
+    setSession((current) =>
+      addStudentPointEvent(
+        current,
+        activeStudentId,
+        points >= 0 ? "merit" : "demerit",
+        Math.abs(points),
+        reason,
+      ),
+    );
   }
 
   return (
@@ -971,50 +996,84 @@ function ScoreAction({
         <Trophy aria-hidden="true" size={34} />
         <div>
           <p className="cp-section-label">점수 추가/삭제</p>
-          <h2>팀 점수 가산과 감점 기록</h2>
+          <h2>{scoreMode === "team" ? "팀 점수 기록" : "학생 개인 점수 기록"}</h2>
         </div>
       </div>
 
-      <TeamRequired session={session}>
-        <div className="cp-action-controls stretch">
-          <TeamSelect
-            selectedTeamId={activeTeamId}
-            setSelectedTeamId={setSelectedTeamId}
-            teams={session.teams}
-          />
-          <label className="cp-field">
-            점수
-            <input
-              type="number"
-              value={points}
-              onChange={(event) => setPoints(Number(event.target.value))}
+      <div className="cp-toggle-row">
+        <button
+          className={scoreMode === "team" ? "active" : ""}
+          disabled={session.teams.length === 0}
+          onClick={() => setScoreMode("team")}
+          type="button"
+        >
+          팀 점수
+        </button>
+        <button
+          className={scoreMode === "student" ? "active" : ""}
+          disabled={session.students.length === 0}
+          onClick={() => setScoreMode("student")}
+          type="button"
+        >
+          개인 점수
+        </button>
+      </div>
+
+      {scoreMode === "team" ? (
+        <TeamRequired session={session}>
+          <div className="cp-action-controls stretch">
+            <TeamSelect
+              selectedTeamId={activeTeamId}
+              setSelectedTeamId={setSelectedTeamId}
+              teams={session.teams}
             />
-          </label>
-          <div className="cp-quick-score-row" aria-label="빠른 점수 선택">
-            {[10, 5, -5, -10].map((quickPoint) => (
-              <button
-                key={quickPoint}
-                onClick={() => setPoints(quickPoint)}
-                type="button"
-              >
-                {quickPoint > 0 ? "+" : ""}
-                {quickPoint}
-              </button>
-            ))}
+            <ScoreInput
+              points={points}
+              reason={reason}
+              setPoints={setPoints}
+              setReason={setReason}
+            />
+            <button className="cp-primary-button" onClick={handleAddScore}>
+              기록하기
+            </button>
           </div>
-          <label className="cp-field">
-            이유
-            <input
-              value={reason}
-              onChange={(event) => setReason(event.target.value)}
+          <ScoreLog session={session} />
+        </TeamRequired>
+      ) : session.students.length === 0 ? (
+        <EmptyAction ctaHref="/" ctaLabel="홈으로" title="학생이 먼저 필요합니다" />
+      ) : (
+        <div className="cp-score-action-stack">
+          <div className="cp-action-controls stretch">
+            <StudentSelect
+              selectedStudentId={activeStudentId}
+              setSelectedStudentId={setSelectedStudentId}
+              students={session.students}
             />
-          </label>
-          <button className="cp-primary-button" onClick={handleAddScore}>
-            기록하기
-          </button>
+            {activeStudent && (
+              <div className="cp-current-score-card">
+                <span>현재 개인 점수</span>
+                <strong>
+                  {activeStudent.name}{" "}
+                  {formatSignedPoints(getStudentScore(activeStudent))}
+                </strong>
+                <em>
+                  상 {activeStudent.merit} · 벌 {activeStudent.demerit}
+                </em>
+              </div>
+            )}
+            <ScoreInput
+              points={points}
+              reason={reason}
+              setPoints={setPoints}
+              setReason={setReason}
+            />
+            <button className="cp-primary-button" onClick={handleAddScore}>
+              기록하기
+            </button>
+          </div>
+          <StudentScoreLog session={session} />
         </div>
-        <ScoreLog session={session} />
-      </TeamRequired>
+      )}
     </section>
   );
 }
@@ -1153,6 +1212,76 @@ function TeamSelect({
   );
 }
 
+function StudentSelect({
+  selectedStudentId,
+  setSelectedStudentId,
+  students,
+}: {
+  selectedStudentId: string;
+  setSelectedStudentId: (studentId: string) => void;
+  students: Student[];
+}) {
+  return (
+    <label className="cp-field">
+      학생
+      <select
+        value={selectedStudentId}
+        onChange={(event) => setSelectedStudentId(event.target.value)}
+      >
+        {students.map((student) => (
+          <option key={student.id} value={student.id}>
+            {student.name}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ScoreInput({
+  points,
+  reason,
+  setPoints,
+  setReason,
+}: {
+  points: number;
+  reason: string;
+  setPoints: (points: number) => void;
+  setReason: (reason: string) => void;
+}) {
+  return (
+    <>
+      <label className="cp-field">
+        점수
+        <input
+          type="number"
+          value={points}
+          onChange={(event) => setPoints(Number(event.target.value))}
+        />
+      </label>
+      <div className="cp-quick-score-row" aria-label="빠른 점수 선택">
+        {[10, 5, -5, -10].map((quickPoint) => (
+          <button
+            key={quickPoint}
+            onClick={() => setPoints(quickPoint)}
+            type="button"
+          >
+            {quickPoint > 0 ? "+" : ""}
+            {quickPoint}
+          </button>
+        ))}
+      </div>
+      <label className="cp-field">
+        이유
+        <input
+          value={reason}
+          onChange={(event) => setReason(event.target.value)}
+        />
+      </label>
+    </>
+  );
+}
+
 function TeamRequired({
   children,
   session,
@@ -1196,6 +1325,35 @@ function ScoreLog({ session }: { session: ClassSession }) {
         ))}
     </div>
   );
+}
+
+function StudentScoreLog({ session }: { session: ClassSession }) {
+  if (session.studentPointEvents.length === 0) {
+    return <div className="cp-empty-inline">아직 개인 점수 기록이 없습니다.</div>;
+  }
+
+  return (
+    <div className="cp-score-log">
+      {session.studentPointEvents
+        .slice()
+        .reverse()
+        .map((event) => (
+          <div key={event.id}>
+            <span>{formatEventTime(event.createdAt)}</span>
+            <strong>{event.studentName}</strong>
+            <em>
+              {event.kind === "merit" ? "+" : "-"}
+              {Math.abs(event.points)}점
+            </em>
+            <p>{event.reason}</p>
+          </div>
+        ))}
+    </div>
+  );
+}
+
+function formatSignedPoints(points: number): string {
+  return `${points > 0 ? "+" : ""}${points}점`;
 }
 
 function EmptyAction({

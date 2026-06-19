@@ -812,6 +812,28 @@ export function getRankedTeams(teams: Team[]): Team[] {
   });
 }
 
+export function getStudentScore(
+  student: Pick<Student, "merit" | "demerit">,
+): number {
+  return student.merit - student.demerit;
+}
+
+export function getRankedStudents(students: Student[]): Student[] {
+  return [...students].sort((left, right) => {
+    const scoreDifference = getStudentScore(right) - getStudentScore(left);
+
+    if (scoreDifference !== 0) {
+      return scoreDifference;
+    }
+
+    if (right.merit !== left.merit) {
+      return right.merit - left.merit;
+    }
+
+    return left.name.localeCompare(right.name);
+  });
+}
+
 export function finishSession(session: ClassSession): ClassSession {
   const winner = getWinnerTeam(session.teams);
 

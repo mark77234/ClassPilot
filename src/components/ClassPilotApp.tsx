@@ -2,9 +2,12 @@
 
 import {
   ArrowRight,
+  BarChart3,
+  Dice5,
   Edit3,
   Gamepad2,
   Home,
+  ListOrdered,
   Minus,
   MonitorPlay,
   MousePointer2,
@@ -20,6 +23,7 @@ import {
   UserPlus,
   UsersRound,
   X,
+  type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
 import type { PointerEvent, ReactNode } from "react";
@@ -32,7 +36,9 @@ import {
   findStudentAtPosition,
   formatEventTime,
   getMainSectionLabel,
+  getRankedStudents,
   getRankedTeams,
+  getStudentScore,
   removeStudentFromSession,
   swapStudentPositions,
   updateStudentProfile,
@@ -40,11 +46,75 @@ import {
   withSessionUpdate,
 } from "@/lib/classpilot";
 import type {
+  ActionId,
   ClassSession,
   MainSection,
   Student,
   StudentPosition,
 } from "@/types/classpilot";
+
+type ActionCardMeta = {
+  Icon: LucideIcon;
+  accent: "blue" | "gold" | "green" | "orange" | "rose";
+  visualLabel: string;
+  recommended?: boolean;
+};
+
+const ACTION_CARD_META: Record<ActionId, ActionCardMeta> = {
+  "team-maker": {
+    Icon: UsersRound,
+    accent: "green",
+    visualLabel: "균형 팀 구성",
+    recommended: true,
+  },
+  "topic-assignment": {
+    Icon: StickyNote,
+    accent: "blue",
+    visualLabel: "팀별 주제 배치",
+  },
+  timer: {
+    Icon: TimerReset,
+    accent: "orange",
+    visualLabel: "활동 시간 관리",
+  },
+  "random-student": {
+    Icon: Dice5,
+    accent: "gold",
+    visualLabel: "발표자 즉시 뽑기",
+  },
+  "presentation-order": {
+    Icon: ListOrdered,
+    accent: "blue",
+    visualLabel: "중복 없는 순서",
+  },
+  poll: {
+    Icon: BarChart3,
+    accent: "green",
+    visualLabel: "투표 결과 막대",
+  },
+  score: {
+    Icon: Trophy,
+    accent: "orange",
+    visualLabel: "팀 점수 기록",
+  },
+  "mini-game": {
+    Icon: Gamepad2,
+    accent: "rose",
+    visualLabel: "마블 물리 게임",
+    recommended: true,
+  },
+  reward: {
+    Icon: Star,
+    accent: "gold",
+    visualLabel: "우승 보상 설정",
+  },
+  finale: {
+    Icon: Rocket,
+    accent: "green",
+    visualLabel: "최종 순위 발표",
+    recommended: true,
+  },
+};
 
 export function ClassPilotApp() {
   const { hydrated, resetSession, session, setSession, updateSession } =
@@ -454,6 +524,7 @@ function HomeSection({
   const activeStudent =
     session.students.find((student) => student.id === selectedStudentId) ??
     session.students[0];
+  const topStudent = getRankedStudents(session.students)[0];
 
   function handlePointerMove(event: PointerEvent<HTMLDivElement>) {
     if (!draggingId || !boardRef.current) {
@@ -514,6 +585,16 @@ function HomeSection({
             label="최고 점수"
             value={`${getRankedTeams(session.teams)[0]?.score ?? 0}점`}
           />
+          <StatBadge
+            label="개인 최고"
+            value={
+              topStudent
+                ? `${topStudent.name} ${formatStudentScore(
+                    getStudentScore(topStudent),
+                  )}`
+                : "0점"
+            }
+          />
         </div>
       </section>
 
@@ -573,6 +654,7 @@ function DraggableStudent({
   student: Student;
 }) {
   const position = previewPosition ?? student.position;
+  const studentScore = getStudentScore(student);
 
   return (
     <button
@@ -590,7 +672,18 @@ function DraggableStudent({
       }}
       type="button"
     >
-      {student.name}
+      <span className="cp-seat-name">{student.name}</span>
+      <span
+        className={[
+          "cp-seat-score",
+          studentScore > 0 ? "positive" : "",
+          studentScore < 0 ? "negative" : "",
+        ]
+          .filter(Boolean)
+          .join(" ")}
+      >
+        {formatStudentScore(studentScore)}
+      </span>
     </button>
   );
 }
@@ -620,6 +713,9 @@ function StudentDetailPanel({
         team.students.some((student) => student.id === selectedStudent.id),
       )
     : undefined;
+  const selectedStudentScore = selectedStudent
+    ? getStudentScore(selectedStudent)
+    : 0;
 
   if (!selectedStudent) {
     return (
@@ -699,6 +795,17 @@ function StudentDetailPanel({
           </span>
         </div>
         <div className="cp-student-point-summary">
+          <span
+            className={[
+              "score",
+              selectedStudentScore > 0 ? "positive" : "",
+              selectedStudentScore < 0 ? "negative" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
+            점 {formatStudentScore(selectedStudentScore)}
+          </span>
           <span>상 {selectedStudent.merit}</span>
           <span>벌 {selectedStudent.demerit}</span>
         </div>
@@ -824,17 +931,41 @@ function ActionsSection() {
       </section>
 
       <section className="cp-action-gallery" aria-label="액션 목록">
-        {ACTION_DEFINITIONS.map((action, index) => (
-          <Link
-            className="cp-action-tile"
-            href={`/actions/${action.id}`}
-            key={action.id}
-          >
-            <span>{String(index + 1).padStart(2, "0")}</span>
-            <strong>{action.title}</strong>
-            <em>{action.detail}</em>
-          </Link>
-        ))}
+        {ACTION_DEFINITIONS.map((action, index) => {
+          const meta = ACTION_CARD_META[action.id];
+          const Icon = meta.Icon;
+
+          return (
+            <Link
+              className={[
+                "cp-action-tile",
+                `cp-action-accent-${meta.accent}`,
+                meta.recommended ? "recommended" : "",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+              href={`/actions/${action.id}`}
+              key={action.id}
+            >
+              <div className="cp-action-tile-header">
+                <span className="cp-action-number">
+                  {String(index + 1).padStart(2, "0")}
+                </span>
+                {meta.recommended && (
+                  <span className="cp-action-recommend-badge">추천 액션</span>
+                )}
+              </div>
+              <div className="cp-action-visual">
+                <Icon aria-hidden="true" size={34} />
+                <span>{meta.visualLabel}</span>
+              </div>
+              <div className="cp-action-copy">
+                <strong>{action.title}</strong>
+                <em>{action.detail}</em>
+              </div>
+            </Link>
+          );
+        })}
       </section>
     </div>
   );
@@ -931,4 +1062,8 @@ function StatBadge({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatStudentScore(score: number): string {
+  return `${score > 0 ? "+" : ""}${score}점`;
 }

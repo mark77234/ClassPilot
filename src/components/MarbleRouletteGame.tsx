@@ -1,6 +1,13 @@
 "use client";
 
-import { Play, RefreshCw, Sparkles, Trophy } from "lucide-react";
+import {
+  Maximize2,
+  Minimize2,
+  Play,
+  RefreshCw,
+  Sparkles,
+  Trophy,
+} from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { addScoreEvent } from "@/lib/classpilot";
 import type {
@@ -28,7 +35,10 @@ type MarbleRuntime = {
   cleanup: () => void;
   focusBall: (candidateId: string) => void;
   release: () => void;
+  setSpeed: (speed: MarbleSpeed) => void;
 };
+
+type MarbleSpeed = 1 | 1.3 | 1.5;
 
 type BallRuntimeState = MarbleCandidate & {
   color: string;
@@ -59,11 +69,13 @@ const PLACE_POINTS = [30, 25, 20, 15, 10, 8, 6, 4, 3, 2];
 const WORLD_HEIGHT = 4200;
 const MIN_VIEWPORT_SIZE = 320;
 const FINISH_THRESHOLD = 184;
+const BASE_TIME_SCALE = 0.58;
 const STICKY_PIN_LABEL = "sticky-pin";
 const BUMPER_PIN_LABEL = "bumper-pin";
 const WARP_PIN_LABEL = "warp-pin";
 const LAUNCHER_PIN_LABEL = "launcher-pin";
 const BREAK_BAR_LABEL = "break-bar";
+const NORMAL_PIN_LABEL = "normal-pin";
 
 export function MarbleRouletteGame({
   session,
@@ -83,6 +95,9 @@ export function MarbleRouletteGame({
   const [focusedBallId, setFocusedBallId] = useState<string>();
   const [results, setResults] = useState<MarbleResult[]>([]);
   const [applied, setApplied] = useState(false);
+  const [speed, setSpeed] = useState<MarbleSpeed>(1);
+  const [fullscreen, setFullscreen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const mountRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<MarbleRuntime | undefined>(undefined);
   const candidates = useMemo(
@@ -95,6 +110,18 @@ export function MarbleRouletteGame({
   useEffect(() => {
     return () => {
       runtimeRef.current?.cleanup();
+    };
+  }, []);
+
+  useEffect(() => {
+    function handleFullscreenChange() {
+      setFullscreen(document.fullscreenElement === rootRef.current);
+    }
+
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullscreenChange);
     };
   }, []);
 
@@ -149,7 +176,7 @@ export function MarbleRouletteGame({
     );
     const width = viewportSize;
     const engine = Matter.Engine.create();
-    engine.timing.timeScale = 0.58;
+    engine.timing.timeScale = BASE_TIME_SCALE * speed;
     engine.gravity.y = 0;
 
     const render = Matter.Render.create({
@@ -182,7 +209,7 @@ export function MarbleRouletteGame({
       { constraint: Matter.Constraint; timer: number }
     >();
     const stickyCooldownUntil = new Map<string, number>();
-    const breakBarIds = new Set<number>();
+    const removedObstacleIds = new Set<number>();
     const warpCooldownUntil = new Map<string, number>();
     let released = false;
     let assistEnabled = false;
@@ -341,6 +368,16 @@ export function MarbleRouletteGame({
       stickyConstraints.delete(bodyId);
     }
 
+    function removeOneShotObstacle(obstacle: Matter.Body): boolean {
+      if (removedObstacleIds.has(obstacle.id)) {
+        return false;
+      }
+
+      removedObstacleIds.add(obstacle.id);
+      Matter.Composite.remove(engine.world, obstacle);
+      return true;
+    }
+
     function attachStickyPin(ball: Matter.Body, stickyPin: Matter.Body) {
       if (!released || finishedBodies.has(ball.id) || stickyConstraints.has(ball.id)) {
         return;
@@ -357,32 +394,19 @@ export function MarbleRouletteGame({
         return;
       }
 
-      Matter.Body.setVelocity(ball, { x: 0, y: 0.04 });
-      Matter.Body.setAngularVelocity(ball, 0);
-      const constraint = Matter.Constraint.create({
-        bodyA: stickyPin,
-        bodyB: ball,
-        damping: 0.22,
-        length: 28,
-        render: { visible: false },
-        stiffness: 0.72,
+      if (!removeOneShotObstacle(stickyPin)) {
+        return;
+      }
+
+      Matter.Body.setVelocity(ball, {
+        x: ball.velocity.x * 0.18,
+        y: Math.max(0.08, ball.velocity.y * 0.12),
       });
-      Matter.Composite.add(engine.world, constraint);
-      appendLog(`${runtime.name} 끈끈이 장애물`);
-
-      const timer = window.setTimeout(() => {
-        Matter.Composite.remove(engine.world, constraint);
-        stickyConstraints.delete(ball.id);
-        stickyCooldownUntil.set(cooldownKey, performance.now() + 2600);
-
-        if (finishedBodies.has(ball.id)) {
-          return;
-        }
-
-        Matter.Body.setVelocity(ball, { x: 0, y: 1.48 });
-      }, 900 + Math.random() * 900);
-
-      stickyConstraints.set(ball.id, { constraint, timer });
+      Matter.Body.setAngularVelocity(ball, 0);
+      stickyCooldownUntil.set(cooldownKey, now + 1200);
+      runtime.lastActiveAt = now;
+      runtime.lastPosition = { x: ball.position.x, y: ball.position.y };
+      appendLog(`${runtime.name} 감속 장애물 파괴`);
     }
 
     function launchFromBumper(ball: Matter.Body, bumper: Matter.Body) {
@@ -398,17 +422,21 @@ export function MarbleRouletteGame({
       }
 
       warpCooldownUntil.set(cooldownKey, now + 900);
+      if (!removeOneShotObstacle(bumper)) {
+        return;
+      }
+
       releaseStickyConstraint(ball.id);
       const horizontalDirection =
         ball.position.x >= bumper.position.x ? 1 : -1;
       Matter.Body.setVelocity(ball, {
-        x: horizontalDirection * (3.4 + Math.random() * 2.2),
-        y: -6.6 - Math.random() * 2.4,
+        x: horizontalDirection * (9.4 + Math.random() * 6.8),
+        y: -11.8 - Math.random() * 6.2,
       });
-      Matter.Body.setAngularVelocity(ball, horizontalDirection * 0.18);
+      Matter.Body.setAngularVelocity(ball, horizontalDirection * 0.62);
       runtime.lastActiveAt = now;
       runtime.lastPosition = { x: ball.position.x, y: ball.position.y };
-      appendLog(`${runtime.name} 탄성 범퍼 반동`);
+      appendLog(`${runtime.name} 강한 범퍼 반동`);
     }
 
     function warpBallUp(ball: Matter.Body, warpPin: Matter.Body) {
@@ -424,7 +452,11 @@ export function MarbleRouletteGame({
       }
 
       releaseStickyConstraint(ball.id);
-      const nextY = clamp(ball.position.y - (460 + Math.random() * 260), 118, WORLD_HEIGHT - 460);
+      if (!removeOneShotObstacle(warpPin)) {
+        return;
+      }
+
+      const nextY = clamp(ball.position.y - (520 + Math.random() * 320), 118, WORLD_HEIGHT - 460);
       const nextX = clamp(
         ball.position.x + (Math.random() - 0.5) * 180,
         64,
@@ -432,8 +464,8 @@ export function MarbleRouletteGame({
       );
       Matter.Body.setPosition(ball, { x: nextX, y: nextY });
       Matter.Body.setVelocity(ball, {
-        x: (Math.random() - 0.5) * 1.4,
-        y: 1.3,
+        x: (Math.random() - 0.5) * 5.2,
+        y: 2.2,
       });
       runtime.lastActiveAt = now;
       runtime.lastPosition = { x: nextX, y: nextY };
@@ -455,11 +487,15 @@ export function MarbleRouletteGame({
       }
 
       releaseStickyConstraint(ball.id);
+      if (!removeOneShotObstacle(launcherPin)) {
+        return;
+      }
+
       Matter.Body.setVelocity(ball, {
-        x: (Math.random() - 0.5) * 2.6,
-        y: -4.8 - Math.random() * 1.8,
+        x: (Math.random() - 0.5) * 7.2,
+        y: -8.4 - Math.random() * 3.8,
       });
-      Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.2);
+      Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.44);
       runtime.lastActiveAt = now;
       runtime.lastPosition = { x: ball.position.x, y: ball.position.y };
       warpCooldownUntil.set(cooldownKey, now + 2400);
@@ -468,20 +504,22 @@ export function MarbleRouletteGame({
 
     function breakOneShotBar(ball: Matter.Body, breakBar: Matter.Body) {
       const runtime = runtimeByBodyId.get(ball.id);
-      if (!runtime || breakBarIds.has(breakBar.id) || finishedBodies.has(ball.id)) {
+      if (!runtime || finishedBodies.has(ball.id)) {
         return;
       }
 
-      breakBarIds.add(breakBar.id);
-      Matter.Composite.remove(engine.world, breakBar);
+      if (!removeOneShotObstacle(breakBar)) {
+        return;
+      }
+
       Matter.Body.setVelocity(ball, {
-        x: (ball.position.x >= breakBar.position.x ? 1 : -1) * (1.4 + Math.random()),
-        y: -3.2 - Math.random() * 1.8,
+        x: (ball.position.x >= breakBar.position.x ? 1 : -1) * (4.2 + Math.random() * 2.8),
+        y: -6.2 - Math.random() * 3.1,
       });
-      Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.16);
+      Matter.Body.setAngularVelocity(ball, (Math.random() - 0.5) * 0.42);
       runtime.lastActiveAt = performance.now();
       runtime.lastPosition = { x: ball.position.x, y: ball.position.y };
-      appendLog(`${runtime.name} 1회성 바 파괴`);
+      appendLog(`${runtime.name} 실선 장애물 파괴`);
     }
 
     function focusCameraOnBody(body: Matter.Body, forceFocusUpdate = false) {
@@ -562,7 +600,6 @@ export function MarbleRouletteGame({
         const breakBar = pairBodies.find((body) =>
           body.label.startsWith(BREAK_BAR_LABEL),
         );
-
         if (hitSensor && ball) {
           finishBall(ball);
         }
@@ -628,7 +665,7 @@ export function MarbleRouletteGame({
 
         Matter.Body.applyForce(ball, ball.position, {
           x: 0,
-          y: assistEnabled ? 0.0025 : 0.0009,
+          y: assistEnabled ? 0.0048 : 0.00135,
         });
       });
 
@@ -698,7 +735,7 @@ export function MarbleRouletteGame({
         );
         appendLog("공을 떨어뜨렸습니다");
         const releasedAt = performance.now();
-        engine.gravity.y = 0.25;
+        engine.gravity.y = 0.32;
         assistTimer = window.setTimeout(() => {
           if (!released || finishedBodies.size === candidates.length) {
             return;
@@ -706,7 +743,7 @@ export function MarbleRouletteGame({
 
           assistEnabled = true;
           appendLog("완주 보조 힘이 켜졌습니다");
-        }, 22000);
+        }, 12000);
         balls.forEach((ball, index) => {
           const runtime = runtimeByBodyId.get(ball.id);
 
@@ -717,10 +754,13 @@ export function MarbleRouletteGame({
 
           Matter.Body.setVelocity(ball, {
             x: 0,
-            y: 0.75 + (index % 4) * 0.05,
+            y: 1.05 + (index % 4) * 0.08,
           });
           Matter.Body.setAngularVelocity(ball, 0);
         });
+      },
+      setSpeed: (nextSpeed: MarbleSpeed) => {
+        engine.timing.timeScale = BASE_TIME_SCALE * nextSpeed;
       },
     };
   }
@@ -739,6 +779,31 @@ export function MarbleRouletteGame({
     setEventLog([]);
     setFocusedBallId(undefined);
     setApplied(false);
+  }
+
+  function handleSpeedChange(nextSpeed: MarbleSpeed) {
+    setSpeed(nextSpeed);
+    runtimeRef.current?.setSpeed(nextSpeed);
+  }
+
+  async function toggleFullscreen() {
+    if (document.fullscreenElement === rootRef.current) {
+      await document.exitFullscreen();
+      return;
+    }
+
+    if (fullscreen && !document.fullscreenElement) {
+      setFullscreen(false);
+      return;
+    }
+
+    setFullscreen(true);
+
+    try {
+      await rootRef.current?.requestFullscreen();
+    } catch {
+      setFullscreen(true);
+    }
   }
 
   function applyTeamScores() {
@@ -762,7 +827,12 @@ export function MarbleRouletteGame({
   }
 
   return (
-    <div className="cp-marble-game">
+    <div
+      className={["cp-marble-game", fullscreen ? "fullscreen" : ""]
+        .filter(Boolean)
+        .join(" ")}
+      ref={rootRef}
+    >
       <div className="cp-game-toolbar">
         <div className="cp-toggle-row">
           <button
@@ -783,7 +853,32 @@ export function MarbleRouletteGame({
           </button>
         </div>
 
+        <div className="cp-toggle-row cp-speed-row" aria-label="레이스 배속">
+          {([1, 1.3, 1.5] as const).map((speedOption) => (
+            <button
+              className={speed === speedOption ? "active" : ""}
+              key={speedOption}
+              onClick={() => handleSpeedChange(speedOption)}
+              type="button"
+            >
+              {speedOption}배속
+            </button>
+          ))}
+        </div>
+
         <div className="cp-game-controls">
+          <button
+            className="cp-secondary-button"
+            onClick={toggleFullscreen}
+            type="button"
+          >
+            {fullscreen ? (
+              <Minimize2 aria-hidden="true" size={18} />
+            ) : (
+              <Maximize2 aria-hidden="true" size={18} />
+            )}
+            {fullscreen ? "전체화면 종료" : "전체화면"}
+          </button>
           <button
             className="cp-secondary-button"
             disabled={running}
@@ -975,34 +1070,48 @@ function createTrackBodies(Matter: typeof import("matter-js"), width: number) {
     ),
   ];
   let row = 0;
-  for (let y = 350; y < WORLD_HEIGHT - 390; y += 142 + Math.random() * 64) {
-    const count = 3 + Math.floor(Math.random() * 4);
+  for (let y = 350; y < WORLD_HEIGHT - 390; y += 158 + Math.random() * 72) {
+    const count = 3 + Math.floor(Math.random() * 3);
     const gap = width / (count + 1);
     const rowShift = (Math.random() - 0.5) * gap * 0.34;
 
     const sideY = y + (row % 2 === 0 ? -18 : 18);
-    bodies.push(
-      createRoundObstacle(Matter, 50, sideY, row % 3 === 0 ? "bumper" : "normal", row, -1),
-      createRoundObstacle(
-        Matter,
-        width - 50,
-        sideY + (row % 2 === 0 ? 30 : -30),
-        row % 3 === 1 ? "bumper" : "normal",
-        row,
-        count,
-      ),
-    );
+    if (row % 2 === 0) {
+      bodies.push(
+        createRoundObstacle(
+          Matter,
+          50,
+          sideY,
+          row % 4 === 0 ? "bumper" : "normal",
+          row,
+          -1,
+        ),
+      );
+    }
+
+    if (row % 3 === 1) {
+      bodies.push(
+        createRoundObstacle(
+          Matter,
+          width - 50,
+          sideY - 24,
+          row % 4 === 1 ? "bumper" : "normal",
+          row,
+          count,
+        ),
+      );
+    }
 
     for (let column = 0; column < count; column += 1) {
       const roll = Math.random();
       const role =
-        roll > 0.9
+        roll > 0.96
           ? "warp"
-          : roll > 0.78
+          : roll > 0.84
             ? "launcher"
-            : roll > 0.58
+            : roll > 0.56
               ? "bumper"
-              : roll > 0.46
+              : roll > 0.44
                 ? "sticky"
                 : "normal";
       const x = clamp(
@@ -1015,31 +1124,52 @@ function createTrackBodies(Matter: typeof import("matter-js"), width: number) {
       bodies.push(createRoundObstacle(Matter, x, pinY, role, row, column));
     }
 
-    if (row % 3 === 1) {
-      const barWidth = Math.min(width * 0.36, 185 + Math.random() * 46);
+    const barCount = row % 3 === 0 ? 2 : 1;
+    for (let barIndex = 0; barIndex < barCount; barIndex += 1) {
+      const barWidth = Math.min(width * 0.32, 126 + Math.random() * 82);
+      const barXBase =
+        barCount === 2
+          ? width * (barIndex === 0 ? 0.34 : 0.66)
+          : width * (row % 2 === 0 ? 0.38 : 0.62);
       const barX = clamp(
-        width * (row % 2 === 0 ? 0.34 : 0.66) + (Math.random() - 0.5) * 78,
-        100,
-        width - 100,
+        barXBase + (Math.random() - 0.5) * 86,
+        92,
+        width - 92,
       );
+      const barY = y + 72 + barIndex * 54;
+      const angle = (row + barIndex) % 2 === 0 ? 0.12 : -0.12;
+
       bodies.push(
-        Matter.Bodies.rectangle(barX, y + 76, barWidth, 13, {
-          friction: 0,
-          isStatic: true,
-          label: `${BREAK_BAR_LABEL}-${row}`,
-          restitution: 1.08,
-          render: {
-            fillStyle: "#b6538f",
-            lineWidth: 3,
-            strokeStyle: "#f6d4eb",
-          },
-        }),
+        createBreakBar(Matter, barX, barY, barWidth, row, barIndex, angle),
       );
     }
     row += 1;
   }
 
   return bodies;
+}
+
+function createBreakBar(
+  Matter: typeof import("matter-js"),
+  x: number,
+  y: number,
+  width: number,
+  row: number,
+  index: number,
+  angle: number,
+) {
+  return Matter.Bodies.rectangle(x, y, width, 13, {
+    angle,
+    friction: 0,
+    isStatic: true,
+    label: `${BREAK_BAR_LABEL}-${row}-${index}`,
+    restitution: 1.72,
+    render: {
+      fillStyle: row % 2 === 0 ? "#b6538f" : "#245f8f",
+      lineWidth: 3,
+      strokeStyle: row % 2 === 0 ? "#f6d4eb" : "#dcecf6",
+    },
+  });
 }
 
 type RoundObstacleRole = "normal" | "bumper" | "sticky" | "warp" | "launcher";
@@ -1071,7 +1201,7 @@ function createRoundObstacle(
           ? `${WARP_PIN_LABEL}-${row}-${column}`
           : role === "launcher"
             ? `${LAUNCHER_PIN_LABEL}-${row}-${column}`
-            : `normal-pin-${row}-${column}`;
+            : `${NORMAL_PIN_LABEL}-${row}-${column}`;
 
   return Matter.Bodies.circle(x, y, radius, {
     friction: role === "sticky" ? 0.08 : 0,
@@ -1080,11 +1210,11 @@ function createRoundObstacle(
     label,
     restitution:
       role === "bumper"
-        ? 1.72
+        ? 3.1
         : role === "sticky"
           ? 0.12
           : role === "launcher"
-            ? 1.1
+            ? 1.7
             : 0.88,
     render: {
       fillStyle:
